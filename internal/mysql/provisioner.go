@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -66,23 +67,21 @@ func (p *Provisioner) EnsureDatabase(ctx context.Context, dbName, user, host, pa
 	}
 	defer db.Close()
 
-	stmts := []string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", dbName),
-		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY ?", user, host),
-		fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY ?", user, host),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%s'", dbName, user, host),
-		"FLUSH PRIVILEGES",
+	// MySQL does NOT support bound parameters (?) in CREATE USER / ALTER USER —
+	// they cannot be prepared. The password is escaped and embedded directly.
+	// Identifiers (dbName/user) are allow-list validated above; host is operator
+	// controlled. Errors use a label so the password is never logged.
+	escPass := escapeString(password)
+	stmts := []struct{ sql, label string }{
+		{fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", dbName), "create database"},
+		{fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s'", user, host, escPass), "create user"},
+		{fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'", user, host, escPass), "alter user"},
+		{fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%s'", dbName, user, host), "grant"},
+		{"FLUSH PRIVILEGES", "flush privileges"},
 	}
-	for i, s := range stmts {
-		var execErr error
-		// Statements 1 and 2 (0-indexed) carry the password parameter.
-		if i == 1 || i == 2 {
-			_, execErr = db.ExecContext(ctx, s, password)
-		} else {
-			_, execErr = db.ExecContext(ctx, s)
-		}
-		if execErr != nil {
-			return fmt.Errorf("mysql exec %q: %w", s, execErr)
+	for _, s := range stmts {
+		if _, err := db.ExecContext(ctx, s.sql); err != nil {
+			return fmt.Errorf("mysql %s: %w", s.label, err)
 		}
 	}
 	return nil
@@ -114,6 +113,29 @@ func (p *Provisioner) DropDatabase(ctx context.Context, dbName, user, host strin
 		}
 	}
 	return nil
+}
+
+// escapeString escapes a value for safe inclusion inside a single-quoted MySQL
+// string literal (used for the password in CREATE/ALTER USER, which cannot take
+// bound parameters).
+func escapeString(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\'', '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case 0:
+			b.WriteString(`\0`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // validateIdent guards against SQL injection via identifiers (which cannot be

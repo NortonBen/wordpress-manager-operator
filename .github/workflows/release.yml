@@ -1,0 +1,61 @@
+name: Release
+
+# On a version tag, publish a turnkey install.yaml that points at the GHCR
+# images for this release, attached to a GitHub Release. Users then install with:
+#   kubectl apply -f https://github.com/<owner>/<repo>/releases/latest/download/install.yaml
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to (re)generate, e.g. v1.2.3"
+        required: true
+
+permissions:
+  contents: write # create releases & upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          REF="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"   # image tag has no leading 'v'
+
+      - name: Lowercase owner (GHCR requires lowercase)
+        id: owner
+        run: echo "lc=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Generate install.yaml for GHCR images
+        env:
+          IMAGE_REGISTRY: ghcr.io/${{ steps.owner.outputs.lc }}
+          IMAGE_TAG: ${{ steps.ver.outputs.version }}
+        run: ./hack/gen-install.sh install.yaml
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          files: install.yaml
+          body: |
+            ## Install
+
+            ```bash
+            kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/install.yaml
+            ```
+
+            Images for this release (multi-arch):
+            - `ghcr.io/${{ steps.owner.outputs.lc }}/wordpress-manager-operator:${{ steps.ver.outputs.version }}`
+            - `ghcr.io/${{ steps.owner.outputs.lc }}/wordpress-manager-apiserver:${{ steps.ver.outputs.version }}`
+            - `ghcr.io/${{ steps.owner.outputs.lc }}/wordpress-manager-ui:${{ steps.ver.outputs.version }}`
+
+            > Before production: change the `change-me-*` Secrets, set an RWX `storageClassName`,
+            > and set your Ingress host. See the README.

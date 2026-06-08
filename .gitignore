@@ -14,3 +14,4 @@ npm-debug.log*
 *.local
 .DS_Store
 kubeconfig
+.dev/          # dev-mock SQLite data

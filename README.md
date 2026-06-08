@@ -31,6 +31,8 @@ Mỗi "host" WordPress được khai báo bằng một Custom Resource `WordPres
 | `internal/resources/` | Builder cho Deployment / Service / Ingress / Secret + đặt tên |
 | `internal/mysql/` | Tạo database + user least-privilege cho mỗi site |
 | `internal/apiserver/` | REST API + auth JWT cho UI |
+| `internal/metrics/` | Theo dõi CPU/RAM (prod: metrics.k8s.io; dev: tổng hợp) |
+| `internal/sqlite/` | Provisioner SQLite cho dev mock (thay MySQL) |
 | `cmd/operator/` | Entrypoint controller manager |
 | `cmd/apiserver/` | Entrypoint REST API |
 | `ui/` | React + TypeScript + Ant Design |
@@ -70,7 +72,15 @@ các vòng lặp (không xoay vòng credential đang chạy).
 - UI có nút **Preview YAML** (`POST /api/v1/sites/preview`) hiển thị đúng manifest operator sẽ sinh ra
   trước khi tạo.
 
-### 6. Auth cho admin
+### 6. Theo dõi tài nguyên (CPU/RAM) trên UI
+`GET /api/v1/metrics` trả về CPU & RAM cấp cụm — **đã dùng / capacity / allocatable / còn trống** —
+kèm usage từng host. UI hiển thị **thẻ tài nguyên** (CPU, RAM với thanh % + "còn trống") ở đầu trang
+quản trị và **cột CPU/RAM theo từng host** trong bảng (poll mỗi 8s).
+- Production: đọc `metrics.k8s.io` (cần **metrics-server**) + capacity từ Node. Thiếu metrics-server thì
+  vẫn báo capacity, usage = 0 và cờ `metricsAvailable=false` (UI hiện badge cảnh báo).
+- Dev mock: `internal/metrics` tổng hợp số liệu từ các site (used tăng/available giảm khi tạo thêm host).
+
+### 7. Auth cho admin
 API bảo vệ bằng **JWT** (HS256). Đăng nhập tại `POST /api/v1/login`; danh tính admin lấy từ env
 (`ADMIN_USERNAME`, `ADMIN_PASSWORD` hoặc `ADMIN_PASSWORD_HASH` bcrypt). Mọi route `/api/v1/*` còn lại
 yêu cầu `Authorization: Bearer <token>`.
@@ -79,6 +89,45 @@ yêu cầu `Authorization: Bearer <token>`.
 
 > ⚠️ Đổi mọi giá trị `change-me-*` trong `deploy/03-mysql.yaml` và `deploy/06-apiserver.yaml` trước khi
 > dùng thật.
+
+### Cách nhanh nhất — **một lệnh `kubectl apply`**
+
+Sau khi image đã có trên registry (xem [hướng dẫn GitHub Actions](docs/GITHUB_ACTIONS.md)):
+
+```bash
+# Từ GitHub Release (install.yaml đã trỏ sẵn image GHCR của tag đó):
+kubectl apply -f https://github.com/<owner>/<repo>/releases/latest/download/install.yaml
+
+# Hoặc từ file trong repo:
+make install                     # = ./hack/gen-install.sh && kubectl apply -f install.yaml
+```
+
+`install.yaml` gói toàn bộ control plane theo đúng thứ tự phụ thuộc (Namespaces → CRD → RBAC → MySQL →
+PVC dùng chung → Operator → API → UI). Sinh lại bất cứ lúc nào: `make install.yaml`.
+Trỏ sang image GHCR: `IMAGE_REGISTRY=ghcr.io/<owner> IMAGE_TAG=latest ./hack/gen-install.sh`.
+
+### Local dev MOCK — không cần Kubernetes, không cần MySQL
+
+Chạy toàn bộ API + UI quản trị **offline** trên máy: dùng **in-memory fake cluster** (mock K8s API) và
+**SQLite** thay cho MySQL. Bật bằng `DEV_MODE=true`.
+
+```bash
+make dev-api    # API mock trên :8090  (SQLite tại .dev/sqlite, k8s in-memory)
+make dev-ui     # UI trên :5173, proxy /api -> :8090
+# đăng nhập: admin / admin
+```
+
+Khi tạo host ở chế độ này, API server tự chạy reconcile **in-process**: tạo file SQLite cho từng site
+(`wp_<site>.db`), dựng Deployment/Service/Ingress/Secret trong cluster ảo, set `status.phase=Ready`. Nhờ
+vậy UI hoạt động đầy đủ (tạo/sửa/xóa/preview YAML) mà không cần cụm thật.
+
+| | Production | Dev mock (`DEV_MODE=true`) |
+|---|---|---|
+| Database | MySQL (`internal/mysql`) | SQLite (`internal/sqlite`) |
+| Kubernetes | cụm thật (operator riêng) | fake client in-memory, reconcile in-process |
+| Owned objects | Server-Side Apply | client-side create/update |
+
+### Cách thủ công (build cục bộ + apply theo thư mục)
 
 ```bash
 # 1. Build image
@@ -117,6 +166,53 @@ make ui-dev           # Vite dev server, proxy /api → :8090
 3. Apply Deployment + Service + Ingress (set ownerRef để GC tự dọn khi xóa site).
 4. Cập nhật `.status` (phase, url, databaseName/User).
 5. Khi xóa: tùy `DROP_DATA_ON_DELETE` mà drop DB; tài nguyên con bị GC qua ownerRef.
+
+## CI/CD (GitHub Actions)
+
+> 📘 Hướng dẫn từng bước (đẩy code, đặt package **public**, cài 1 lệnh, xử lý sự cố):
+> [docs/GITHUB_ACTIONS.md](docs/GITHUB_ACTIONS.md).
+
+| Workflow | Khi nào chạy | Việc làm |
+|---|---|---|
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | push/PR vào `main` | `go build/vet/test -race` + UI `npm test` + `npm run build` |
+| [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) | **chỉ khi tag `v*`** (+ dispatch) | build 3 image (matrix) multi-arch, **push lên GHCR** |
+| [`.github/workflows/release.yml`](.github/workflows/release.yml) | tag `v*` | sinh `install.yaml` (trỏ image GHCR) + tạo **GitHub Release** đính kèm |
+| [`.github/workflows/e2e.yml`](.github/workflows/e2e.yml) | thủ công / lịch tuần | **full luồng** trên kind: cài → tạo host → assert DB/Ingress/API |
+
+### Kiểm thử
+
+```bash
+go test ./...          # unit: resources builders + REST API (mock cluster fake client)
+cd ui && npm test      # unit: UI quản trị (Vitest + Testing Library, mock api/client)
+./hack/e2e.sh          # full luồng end-to-end trên kind (xem bên dưới)
+```
+
+`hack/e2e.sh` dựng một kind cluster tạm rồi chạy **đúng luồng thật**: build 3 image → load →
+cài `install.yaml` (MySQL + operator + API + UI) → cài ingress-nginx → tạo một `WordPressSite` →
+**kiểm chứng**: CR `Ready`, Secret/Service/Ingress được sinh, database `wp_*` + user `wpu_*` tạo trong
+MySQL (grant đúng phạm vi), pod WordPress **phục vụ qua Ingress**, và REST API login/create/list hoạt động.
+Giữ cluster để soi: `KEEP=1 ./hack/e2e.sh`.
+
+Image xuất bản (multi-arch `amd64`+`arm64`) lên GitHub Container Registry:
+
+```
+ghcr.io/<owner>/wordpress-manager-operator
+ghcr.io/<owner>/wordpress-manager-apiserver
+ghcr.io/<owner>/wordpress-manager-ui
+```
+
+Tag tự sinh: tên branch, `pr-<n>`, `sha-xxxxxxx`, SemVer (khi push tag `v1.2.3`), và `latest` ở branch mặc định.
+Không cần secret thêm — workflow dùng `GITHUB_TOKEN` sẵn có (cần bật *Read and write* cho Actions, hoặc
+để mặc định với `permissions: packages: write`).
+
+Sau khi push, trỏ manifest về image GHCR (thay `<owner>`):
+
+```bash
+sed -i '' "s#wordpress-manager/operator:latest#ghcr.io/<owner>/wordpress-manager-operator:latest#"   deploy/05-operator.yaml
+sed -i '' "s#wordpress-manager/apiserver:latest#ghcr.io/<owner>/wordpress-manager-apiserver:latest#" deploy/06-apiserver.yaml
+sed -i '' "s#wordpress-manager/ui:latest#ghcr.io/<owner>/wordpress-manager-ui:latest#"               deploy/07-ui.yaml
+```
+> Nếu package GHCR để **private**, tạo `imagePullSecret` và gắn vào các ServiceAccount tương ứng.
 
 ## Bảo mật — lưu ý production
 - Thay admin MySQL `root` bằng user quản trị riêng; cân nhắc TLS tới MySQL.

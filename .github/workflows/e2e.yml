@@ -1,0 +1,37 @@
+name: E2E (kind)
+
+# Full-flow smoke test on a throwaway kind cluster: build → install control
+# plane → create a WordPressSite → assert DB/Secret/Service/Ingress + WordPress
+# serving + REST API. Manual by default (heavy); enable PR trigger if desired.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install kind
+        run: go install sigs.k8s.io/kind@v0.24.0
+
+      - name: Run full-flow e2e
+        run: ./hack/e2e.sh
+        env:
+          KIND_CLUSTER: ci
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get all -A || true
+          kubectl -n wordpress-sites describe wordpresssite || true
+          kubectl -n wordpress-system logs deploy/wordpress-operator --tail=200 || true
+          kubectl -n wordpress-sites describe pods || true

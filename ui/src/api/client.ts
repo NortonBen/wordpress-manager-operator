@@ -80,3 +80,37 @@ export async function previewYAML(site: Partial<Site>): Promise<string> {
   const { data } = await api.post("/sites/preview", site, { responseType: "text" });
   return data as string;
 }
+
+// ---- Resource metrics ----
+
+export interface Metric {
+  used: number;
+  capacity: number;
+  allocatable: number;
+  available: number;
+}
+export interface NodeMetric {
+  name: string;
+  cpu: Metric;
+  memory: Metric;
+}
+export interface ClusterMetrics {
+  cpu: Metric; // millicores
+  memory: Metric; // bytes
+  nodes: NodeMetric[];
+  metricsAvailable: boolean;
+}
+export interface SiteUsage {
+  name: string;
+  cpuMillicores: number;
+  memoryBytes: number;
+}
+export interface MetricsResponse {
+  cluster: ClusterMetrics;
+  sites: SiteUsage[];
+}
+
+export async function getMetrics(): Promise<MetricsResponse> {
+  const { data } = await api.get<MetricsResponse>("/metrics");
+  return data;
+}

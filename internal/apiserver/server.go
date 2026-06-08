@@ -1,15 +1,23 @@
 package apiserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/benji/wordpress-manager-operator/internal/metrics"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// ReconcileFunc reconciles a single site by namespace/name. In production the
+// operator does this out-of-process and this is nil; in local dev mode the API
+// server runs the reconciler in-process against a mock cluster.
+type ReconcileFunc func(ctx context.Context, namespace, name string) error
 
 // Server hosts the admin REST API consumed by the React UI.
 type Server struct {
@@ -18,6 +26,17 @@ type Server struct {
 	Namespace string // namespace WordPressSites live in
 	DBHost    string
 	DBPort    string
+	Metrics   metrics.Provider // cluster/site CPU+RAM usage
+
+	// Reconcile, when set (dev mode), is invoked after create/delete so the
+	// mock cluster converges immediately without a separate operator process.
+	Reconcile ReconcileFunc
+}
+
+func (s *Server) maybeReconcile(ctx context.Context, name string) {
+	if s.Reconcile != nil {
+		_ = s.Reconcile(ctx, s.Namespace, name)
+	}
 }
 
 // Router builds the HTTP handler with auth, CORS and routes.
@@ -47,6 +66,7 @@ func (s *Server) Router(corsOrigins []string) http.Handler {
 		pr.Post("/api/v1/sites/preview", s.previewYAML)
 		pr.Get("/api/v1/sites/{name}", s.getSite)
 		pr.Delete("/api/v1/sites/{name}", s.deleteSite)
+		pr.Get("/api/v1/metrics", s.getMetrics)
 		pr.Get("/api/v1/me", s.me)
 	})
 	return r
@@ -72,4 +92,27 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	user, _ := r.Context().Value(userCtxKey).(string)
 	writeJSON(w, http.StatusOK, map[string]string{"username": user})
+}
+
+// getMetrics returns cluster CPU/RAM (used, capacity, allocatable, remaining)
+// plus per-site usage, powering the dashboard resource cards.
+func (s *Server) getMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.Metrics == nil {
+		writeError(w, http.StatusServiceUnavailable, "metrics not configured")
+		return
+	}
+	cluster, err := s.Metrics.Cluster(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sites, err := s.Metrics.Sites(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sites == nil {
+		sites = []metrics.SiteUsage{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cluster": cluster, "sites": sites})
 }

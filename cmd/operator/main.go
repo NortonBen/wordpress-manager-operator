@@ -54,7 +54,7 @@ func main() {
 	reconciler := &controller.WordPressSiteReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		MySQL: mysql.New(mysql.Config{
+		DB: mysql.New(mysql.Config{
 			Host:     env("MYSQL_HOST", "mysql"),
 			Port:     env("MYSQL_PORT", "3306"),
 			User:     env("MYSQL_ADMIN_USER", "root"),

@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Table, Tag, Button, Space, Popconfirm, message, Typography, Tooltip } from "antd";
 import { ReloadOutlined, PlusOutlined, DeleteOutlined, GlobalOutlined } from "@ant-design/icons";
-import { listSites, deleteSite, type Site } from "../api/client";
+import { listSites, deleteSite, getMetrics, type Site, type MetricsResponse } from "../api/client";
+import ResourceCards from "../components/ResourceCards";
+import { millis, mib } from "../format";
 
 const phaseColor: Record<string, string> = {
   Ready: "green",
@@ -14,18 +16,23 @@ const phaseColor: Record<string, string> = {
 
 export default function SitesList() {
   const [sites, setSites] = useState<Site[]>([]);
+  const [metrics, setMetrics] = useState<MetricsResponse | undefined>();
   const [loading, setLoading] = useState(false);
 
   async function refresh() {
     setLoading(true);
     try {
-      setSites(await listSites());
+      const [s, m] = await Promise.all([listSites(), getMetrics().catch(() => undefined)]);
+      setSites(s);
+      if (m) setMetrics(m);
     } catch {
       message.error("Failed to load hosts");
     } finally {
       setLoading(false);
     }
   }
+
+  const usage = new Map((metrics?.sites ?? []).map((u) => [u.name, u]));
 
   useEffect(() => {
     refresh();
@@ -61,6 +68,8 @@ export default function SitesList() {
         </Space>
       </Space>
 
+      <ResourceCards cluster={metrics?.cluster} />
+
       <Table<Site>
         rowKey="name"
         loading={loading}
@@ -88,6 +97,24 @@ export default function SitesList() {
             dataIndex: "tlsEnabled",
             width: 70,
             render: (v: boolean) => (v ? <Tag color="green">on</Tag> : <Tag>off</Tag>),
+          },
+          {
+            title: "CPU",
+            key: "cpu",
+            width: 80,
+            render: (_, r) => {
+              const u = usage.get(r.name);
+              return u ? <span>{millis(u.cpuMillicores)}</span> : <Typography.Text type="secondary">–</Typography.Text>;
+            },
+          },
+          {
+            title: "RAM",
+            key: "ram",
+            width: 90,
+            render: (_, r) => {
+              const u = usage.get(r.name);
+              return u ? <span>{mib(u.memoryBytes)}</span> : <Typography.Text type="secondary">–</Typography.Text>;
+            },
           },
           {
             title: "Database",

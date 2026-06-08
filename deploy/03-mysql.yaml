@@ -45,8 +45,10 @@ spec:
       containers:
         - name: mysql
           image: mysql:8.4
+          # Note: MySQL 8.4 removed --default-authentication-plugin;
+          # caching_sha2_password is already the default. Use
+          # --mysql-native-password=ON only if a client needs the legacy plugin.
           args:
-            - --default-authentication-plugin=caching_sha2_password
             - --max_connections=512
           ports:
             - containerPort: 3306

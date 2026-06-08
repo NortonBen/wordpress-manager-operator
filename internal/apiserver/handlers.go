@@ -20,16 +20,16 @@ import (
 // SiteDTO is the JSON shape exchanged with the UI. It is intentionally smaller
 // and flatter than the full CRD.
 type SiteDTO struct {
-	Name        string   `json:"name"`
-	Domain      string   `json:"domain"`
-	Aliases     []string `json:"aliases,omitempty"`
-	Image       string   `json:"image,omitempty"`
-	Replicas    int32    `json:"replicas"`
-	TLSEnabled  bool     `json:"tlsEnabled"`
-	TLSIssuer   string   `json:"tlsIssuer,omitempty"`
-	IngressClass string  `json:"ingressClass,omitempty"`
-	TablePrefix string   `json:"tablePrefix,omitempty"`
-	PHPConfig   string   `json:"phpConfig,omitempty"`
+	Name         string   `json:"name"`
+	Domain       string   `json:"domain"`
+	Aliases      []string `json:"aliases,omitempty"`
+	Image        string   `json:"image,omitempty"`
+	Replicas     int32    `json:"replicas"`
+	TLSEnabled   bool     `json:"tlsEnabled"`
+	TLSIssuer    string   `json:"tlsIssuer,omitempty"`
+	IngressClass string   `json:"ingressClass,omitempty"`
+	TablePrefix  string   `json:"tablePrefix,omitempty"`
+	PHPConfig    string   `json:"phpConfig,omitempty"`
 
 	// Read-only status, populated on GET/list.
 	Phase        string `json:"phase,omitempty"`
@@ -122,6 +122,11 @@ func (s *Server) createSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Dev mode: reconcile in-process so the site immediately gains status.
+	s.maybeReconcile(r.Context(), site.Name)
+	if s.Reconcile != nil {
+		_ = s.K8s.Get(r.Context(), client.ObjectKeyFromObject(site), site)
+	}
 	writeJSON(w, http.StatusCreated, toDTO(site))
 }
 
@@ -135,6 +140,8 @@ func (s *Server) deleteSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Dev mode: process the finalizer in-process so the delete completes.
+	s.maybeReconcile(r.Context(), site.Name)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -147,13 +154,18 @@ func (s *Server) previewYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	site := dto.toSite(s.Namespace)
+	// Stamp apiVersion/kind so the preview is valid, directly-applyable YAML
+	// (typed objects carry no TypeMeta until they pass through the API server).
+	site.TypeMeta = metav1.TypeMeta{APIVersion: wpv1.GroupVersion.String(), Kind: "WordPressSite"}
+	dep := resources.DesiredDeployment(site, s.DBHost, s.DBPort)
+	dep.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"}
+	svc := resources.DesiredService(site)
+	svc.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Service"}
+	ing := resources.DesiredIngress(site)
+	ing.TypeMeta = metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"}
+
 	docs := [][]byte{}
-	for _, obj := range []any{
-		site,
-		resources.DesiredDeployment(site, s.DBHost, s.DBPort),
-		resources.DesiredService(site),
-		resources.DesiredIngress(site),
-	} {
+	for _, obj := range []any{site, dep, svc, ing} {
 		b, err := yaml.Marshal(obj)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

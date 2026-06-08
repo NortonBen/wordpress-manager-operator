@@ -6,10 +6,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	wpv1 "github.com/benji/wordpress-manager-operator/api/v1alpha1"
-	"github.com/benji/wordpress-manager-operator/internal/mysql"
 	"github.com/benji/wordpress-manager-operator/internal/resources"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -20,24 +20,41 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// Database provisions per-site databases and users. The production
+// implementation targets the shared MySQL server (internal/mysql); a SQLite
+// implementation (internal/sqlite) backs local dev with no MySQL required.
+type Database interface {
+	EnsureDatabase(ctx context.Context, dbName, user, host, password string) error
+	DropDatabase(ctx context.Context, dbName, user, host string) error
+}
 
 // WordPressSiteReconciler reconciles a WordPressSite object.
 type WordPressSiteReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	MySQL  *mysql.Provisioner
+	DB     Database
 
 	// DBHost / DBPort are injected into every site so WordPress can reach the
-	// shared MySQL server.
+	// shared database server.
 	DBHost string
 	DBPort string
 
 	// DropDataOnDelete, when true, drops the per-site database when the site is
 	// deleted. Defaults to false to avoid accidental data loss.
 	DropDataOnDelete bool
+
+	// NoServerSideApply switches owned-object reconciliation from Server-Side
+	// Apply to a plain client-side create/update. SSA is the default and is
+	// required in production to stay idempotent (no generation churn / hot loop)
+	// while sharing the cluster with other controllers. It is unsupported by the
+	// in-memory fake client, so local dev mode (single, manually-driven
+	// reconcile — no watch loop) sets this true.
+	NoServerSideApply bool
 }
 
 // +kubebuilder:rbac:groups=wp.benji.dev,resources=wordpresssites,verbs=get;list;watch;create;update;patch;delete
@@ -83,7 +100,7 @@ func (r *WordPressSiteReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 2. Provision MySQL database + dedicated user using the secret's password.
 	password := string(secret.Data[resources.SecretKeyDBPassword])
-	if err := r.MySQL.EnsureDatabase(ctx,
+	if err := r.DB.EnsureDatabase(ctx,
 		resources.DatabaseName(site),
 		resources.DatabaseUser(site),
 		resources.DatabaseHost(site),
@@ -112,16 +129,13 @@ func (r *WordPressSiteReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (r *WordPressSiteReconciler) reconcileWorkload(ctx context.Context, site *wpv1.WordPressSite) error {
-	dep := resources.DesiredDeployment(site, r.DBHost, r.DBPort)
-	if err := r.apply(ctx, site, dep, &appsv1.Deployment{}); err != nil {
+	if err := r.apply(ctx, site, resources.DesiredDeployment(site, r.DBHost, r.DBPort)); err != nil {
 		return err
 	}
-	svc := resources.DesiredService(site)
-	if err := r.apply(ctx, site, svc, &corev1.Service{}); err != nil {
+	if err := r.apply(ctx, site, resources.DesiredService(site)); err != nil {
 		return err
 	}
-	ing := resources.DesiredIngress(site)
-	if err := r.apply(ctx, site, ing, &netv1.Ingress{}); err != nil {
+	if err := r.apply(ctx, site, resources.DesiredIngress(site)); err != nil {
 		return err
 	}
 	return nil
@@ -147,6 +161,11 @@ func (r *WordPressSiteReconciler) ensureSecret(ctx context.Context, site *wpv1.W
 		}
 		return desired, nil
 	}
+	// Skip the update when nothing changed so we don't churn the Secret's
+	// resourceVersion (and re-trigger our own watch) every reconcile.
+	if reflect.DeepEqual(existing.Data, desired.Data) {
+		return existing, nil
+	}
 	desired.ResourceVersion = existing.ResourceVersion
 	if err := r.Update(ctx, desired); err != nil {
 		return nil, err
@@ -154,28 +173,44 @@ func (r *WordPressSiteReconciler) ensureSecret(ctx context.Context, site *wpv1.W
 	return desired, nil
 }
 
-// apply creates or updates an owned object, setting the controller reference so
-// garbage collection removes it when the site is deleted.
-func (r *WordPressSiteReconciler) apply(ctx context.Context, site *wpv1.WordPressSite, desired, found client.Object) error {
+// apply reconciles an owned object via Server-Side Apply. SSA is idempotent:
+// re-applying an unchanged object does not bump .metadata.generation, so the
+// operator does NOT hot-loop on its own watch events (which a plain Update —
+// that round-trips server-defaulted fields — would cause). The controller
+// reference makes the object garbage-collected when the site is deleted.
+func (r *WordPressSiteReconciler) apply(ctx context.Context, site *wpv1.WordPressSite, desired client.Object) error {
 	if err := controllerutil.SetControllerReference(site, desired, r.Scheme); err != nil {
 		return err
 	}
-	key := client.ObjectKeyFromObject(desired)
-	err := r.Get(ctx, key, found)
-	if apierrors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	} else if err != nil {
+
+	if r.NoServerSideApply {
+		// Dev/fake-client path: plain create-or-update (no watch loop here, so
+		// the generation churn that SSA avoids is harmless).
+		found := desired.DeepCopyObject().(client.Object)
+		if err := r.Get(ctx, client.ObjectKeyFromObject(desired), found); err != nil {
+			if apierrors.IsNotFound(err) {
+				return r.Create(ctx, desired)
+			}
+			return err
+		}
+		desired.SetResourceVersion(found.GetResourceVersion())
+		return r.Update(ctx, desired)
+	}
+
+	gvk, err := apiutil.GVKForObject(desired, r.Scheme)
+	if err != nil {
 		return err
 	}
-	desired.SetResourceVersion(found.GetResourceVersion())
-	return r.Update(ctx, desired)
+	desired.GetObjectKind().SetGroupVersionKind(gvk)
+	return r.Patch(ctx, desired, client.Apply,
+		client.FieldOwner("wordpress-operator"), client.ForceOwnership)
 }
 
 func (r *WordPressSiteReconciler) reconcileDelete(ctx context.Context, site *wpv1.WordPressSite) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 	if controllerutil.ContainsFinalizer(site, wpv1.Finalizer) {
 		if r.DropDataOnDelete {
-			if err := r.MySQL.DropDatabase(ctx,
+			if err := r.DB.DropDatabase(ctx,
 				resources.DatabaseName(site),
 				resources.DatabaseUser(site),
 				resources.DatabaseHost(site),
