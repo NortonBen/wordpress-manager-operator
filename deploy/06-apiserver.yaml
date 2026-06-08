@@ -1,0 +1,82 @@
+# Admin REST API + auth. The React UI talks to this; it CRUDs WordPressSite CRs.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wordpress-apiserver
+  namespace: wordpress-system
+type: Opaque
+stringData:
+  # CHANGE THESE. ADMIN_PASSWORD is hashed in-memory at startup; for production
+  # supply ADMIN_PASSWORD_HASH (bcrypt) instead and drop ADMIN_PASSWORD.
+  ADMIN_USERNAME: "admin"
+  ADMIN_PASSWORD: "change-me-admin-password"
+  JWT_SECRET: "change-me-to-a-long-random-string"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress-apiserver
+  namespace: wordpress-system
+  labels:
+    app: wordpress-apiserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress-apiserver
+  template:
+    metadata:
+      labels:
+        app: wordpress-apiserver
+    spec:
+      serviceAccountName: wordpress-apiserver
+      containers:
+        - name: apiserver
+          image: wordpress-manager/apiserver:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: wordpress-apiserver
+          env:
+            - name: API_ADDR
+              value: ":8090"
+            - name: SITES_NAMESPACE
+              value: "wordpress-sites"
+            - name: MYSQL_HOST
+              value: "mysql.wordpress-system.svc.cluster.local"
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: CORS_ORIGINS
+              value: "*" # tighten to the UI origin in production
+          ports:
+            - containerPort: 8090
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-apiserver
+  namespace: wordpress-system
+spec:
+  selector:
+    app: wordpress-apiserver
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090

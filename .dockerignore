@@ -1,0 +1,10 @@
+# Keep the build context small for the operator/apiserver image builds.
+.git
+.github
+ui/node_modules
+ui/dist
+ui/*.tsbuildinfo
+**/*.test
+bin
+*.md
+.DS_Store

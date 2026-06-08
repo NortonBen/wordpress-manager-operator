@@ -1,0 +1,16 @@
+# Go
+/bin/
+*.out
+*.test
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/*.tsbuildinfo
+npm-debug.log*
+
+# Local
+.env
+*.local
+.DS_Store
+kubeconfig

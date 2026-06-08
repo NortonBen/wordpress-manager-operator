@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress-operator
+  namespace: wordpress-system
+  labels:
+    app: wordpress-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress-operator
+  template:
+    metadata:
+      labels:
+        app: wordpress-operator
+    spec:
+      serviceAccountName: wordpress-operator
+      containers:
+        - name: operator
+          image: wordpress-manager/operator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MYSQL_HOST
+              value: "mysql.wordpress-system.svc.cluster.local"
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_ADMIN_USER
+              value: "root"
+            - name: MYSQL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-admin
+                  key: MYSQL_ROOT_PASSWORD
+            - name: SHARED_PVC_NAME
+              value: "wordpress-shared"
+            - name: INGRESS_CLASS
+              value: "nginx"
+            - name: DROP_DATA_ON_DELETE
+              value: "false" # keep tenant data on site deletion by default
+            - name: LEADER_ELECT
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: health
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

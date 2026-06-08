@@ -1,0 +1,15 @@
+# Namespaces: one for the control-plane (operator, API, MySQL, UI) and one that
+# holds all tenant WordPressSite resources and their generated workloads.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wordpress-system
+  labels:
+    app.kubernetes.io/part-of: wordpress-manager-operator
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wordpress-sites
+  labels:
+    app.kubernetes.io/part-of: wordpress-manager-operator

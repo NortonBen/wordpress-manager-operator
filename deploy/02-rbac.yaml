@@ -1,0 +1,73 @@
+# ---------- Operator ServiceAccount + RBAC ----------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wordpress-operator
+  namespace: wordpress-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wordpress-operator
+rules:
+  - apiGroups: ["wp.benji.dev"]
+    resources: ["wordpresssites", "wordpresssites/status", "wordpresssites/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Leader election.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wordpress-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wordpress-operator
+subjects:
+  - kind: ServiceAccount
+    name: wordpress-operator
+    namespace: wordpress-system
+---
+# ---------- API server ServiceAccount + RBAC ----------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wordpress-apiserver
+  namespace: wordpress-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wordpress-apiserver
+rules:
+  - apiGroups: ["wp.benji.dev"]
+    resources: ["wordpresssites", "wordpresssites/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wordpress-apiserver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wordpress-apiserver
+subjects:
+  - kind: ServiceAccount
+    name: wordpress-apiserver
+    namespace: wordpress-system

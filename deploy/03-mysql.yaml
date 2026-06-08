@@ -1,0 +1,90 @@
+# Shared MySQL server. The operator connects with the admin (root) credentials
+# to create a dedicated database + least-privilege user per WordPress host.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-admin
+  namespace: wordpress-system
+type: Opaque
+stringData:
+  # CHANGE THIS before production. Used by the operator as MYSQL_ADMIN_PASSWORD.
+  MYSQL_ROOT_PASSWORD: "change-me-root-password"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: wordpress-system
+  labels:
+    app: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+  clusterIP: None # headless, for the StatefulSet
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: wordpress-system
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          args:
+            - --default-authentication-plugin=caching_sha2_password
+            - --max_connections=512
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-admin
+                  key: MYSQL_ROOT_PASSWORD
+            # Allow root to connect from operator pods (other namespaces/IPs).
+            - name: MYSQL_ROOT_HOST
+              value: "%"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"]
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: standard   # set to your cluster's default if needed
+        resources:
+          requests:
+            storage: 20Gi

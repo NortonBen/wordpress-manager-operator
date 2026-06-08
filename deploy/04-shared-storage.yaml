@@ -1,0 +1,21 @@
+# Shared ReadWriteMany volume. EVERY WordPress host mounts this single claim,
+# but each at its own subPath (the site name), so hosts share one volume while
+# their files stay isolated in separate sub-folders.
+#
+# IMPORTANT: ReadWriteMany requires a shared-filesystem provisioner —
+# e.g. NFS (nfs-subdir-external-provisioner), CephFS, Longhorn-RWX, AWS EFS,
+# Azure Files, GCP Filestore. Set storageClassName to that provisioner.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wordpress-shared
+  namespace: wordpress-sites
+  labels:
+    app.kubernetes.io/part-of: wordpress-manager-operator
+spec:
+  accessModes:
+    - ReadWriteMany
+  # storageClassName: nfs-client    # <-- set to your RWX storage class
+  resources:
+    requests:
+      storage: 50Gi

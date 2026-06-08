@@ -1,0 +1,73 @@
+# React admin UI (served by nginx) + an Ingress that exposes both the UI and the
+# /api path on a single admin hostname.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress-ui
+  namespace: wordpress-system
+  labels:
+    app: wordpress-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordpress-ui
+  template:
+    metadata:
+      labels:
+        app: wordpress-ui
+    spec:
+      containers:
+        - name: ui
+          image: wordpress-manager/ui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-ui
+  namespace: wordpress-system
+spec:
+  selector:
+    app: wordpress-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wordpress-admin
+  namespace: wordpress-system
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: admin.wordpress.local # <-- change to your admin hostname
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress-apiserver
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress-ui
+                port:
+                  number: 80
