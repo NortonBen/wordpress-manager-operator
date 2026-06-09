@@ -77,8 +77,7 @@ describe("SiteDetail page", () => {
     const domain = (await screen.findByLabelText("Domain")) as HTMLInputElement;
     expect(domain.value).toBe("blog.acme.example");
 
-    await userEvent.clear(domain);
-    await userEvent.type(domain, "new.acme.example");
+    fireEvent.change(domain, { target: { value: "new.acme.example" } });
     await userEvent.click(screen.getByRole("button", { name: /Lưu/ }));
 
     await waitFor(() => expect(mUpdate).toHaveBeenCalled());

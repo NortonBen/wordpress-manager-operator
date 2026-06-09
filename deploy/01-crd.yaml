@@ -87,6 +87,8 @@ spec:
                 tablePrefix:
                   type: string
                   default: wp_
+                forceHTTPS:
+                  type: boolean
                 suspend:
                   type: boolean
             status:

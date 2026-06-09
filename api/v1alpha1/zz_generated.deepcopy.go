@@ -72,6 +72,10 @@ func (in *WordPressSiteSpec) DeepCopyInto(out *WordPressSiteSpec) {
 		r := *in.Replicas
 		out.Replicas = &r
 	}
+	if in.ForceHTTPS != nil {
+		b := *in.ForceHTTPS
+		out.ForceHTTPS = &b
+	}
 	in.Resources.DeepCopyInto(&out.Resources)
 	out.Storage = in.Storage
 	out.Database = in.Database

@@ -33,6 +33,7 @@ type SiteDTO struct {
 	TablePrefix  string   `json:"tablePrefix,omitempty"`
 	PHPConfig    string   `json:"phpConfig,omitempty"`
 	PHPIni       string   `json:"phpIni,omitempty"`
+	ForceHTTPS   *bool    `json:"forceHTTPS,omitempty"`
 	Suspended    bool     `json:"suspended"`
 
 	// Read-only status, populated on GET/list.
@@ -48,6 +49,7 @@ func toDTO(s *wpv1.WordPressSite) SiteDTO {
 	if s.Spec.Replicas != nil {
 		replicas = *s.Spec.Replicas
 	}
+	forceHTTPS := resources.ForceHTTPSEnabled(s)
 	return SiteDTO{
 		Name:         s.Name,
 		Domain:       s.Spec.Domain,
@@ -60,6 +62,7 @@ func toDTO(s *wpv1.WordPressSite) SiteDTO {
 		TablePrefix:  s.Spec.TablePrefix,
 		PHPConfig:    s.Spec.PHPConfig,
 		PHPIni:       s.Spec.PHPIni,
+		ForceHTTPS:   &forceHTTPS,
 		Suspended:    s.Spec.Suspend,
 		Phase:        s.Status.Phase,
 		Message:      latestConditionMessage(s),
@@ -85,6 +88,7 @@ func (d SiteDTO) toSite(namespace string) *wpv1.WordPressSite {
 			TablePrefix:      d.TablePrefix,
 			PHPConfig:        d.PHPConfig,
 			PHPIni:           d.PHPIni,
+			ForceHTTPS:       d.ForceHTTPS,
 			TLS:              wpv1.TLSSpec{Enabled: d.TLSEnabled, Issuer: d.TLSIssuer},
 		},
 	}
@@ -270,6 +274,9 @@ func (s *Server) updateSite(w http.ResponseWriter, r *http.Request) {
 	sp.TablePrefix = dto.TablePrefix
 	sp.PHPConfig = dto.PHPConfig
 	sp.PHPIni = dto.PHPIni
+	if dto.ForceHTTPS != nil {
+		sp.ForceHTTPS = dto.ForceHTTPS
+	}
 	sp.TLS = wpv1.TLSSpec{Enabled: dto.TLSEnabled, Issuer: dto.TLSIssuer}
 
 	if err := s.K8s.Update(r.Context(), site); err != nil {

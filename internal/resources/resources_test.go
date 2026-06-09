@@ -1,9 +1,11 @@
 package resources
 
 import (
+	"strings"
 	"testing"
 
 	wpv1 "github.com/benji/wordpress-manager-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -127,6 +129,46 @@ func TestPHPIniMountedAndHashed(t *testing.T) {
 	dep2 := DesiredDeployment(s, "mysql", "3306")
 	if dep2.Spec.Template.ObjectMeta.Annotations["wp.benji.dev/php-ini-hash"] == defaultHash {
 		t.Error("hash should change when php.ini changes")
+	}
+}
+
+func configExtra(dep *appsv1.Deployment) (string, bool) {
+	for _, e := range dep.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "WORDPRESS_CONFIG_EXTRA" {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+func TestForceHTTPSDefaultOnAndToggle(t *testing.T) {
+	s := site("blog-acme")
+
+	// Default (unset) → ON: the forwarded-proto line is injected.
+	if !ForceHTTPSEnabled(s) {
+		t.Error("ForceHTTPS should default to true")
+	}
+	v, ok := configExtra(DesiredDeployment(s, "mysql", "3306"))
+	if !ok || !strings.Contains(v, ForceHTTPSSnippet) {
+		t.Errorf("expected forwarded-proto snippet by default, got %q", v)
+	}
+
+	// Combined with user phpConfig.
+	s.Spec.PHPConfig = "define('WP_DEBUG', true);"
+	v, _ = configExtra(DesiredDeployment(s, "mysql", "3306"))
+	if !strings.Contains(v, ForceHTTPSSnippet) || !strings.Contains(v, "WP_DEBUG") {
+		t.Errorf("expected both snippet and phpConfig, got %q", v)
+	}
+
+	// Explicitly OFF → no snippet (and no CONFIG_EXTRA if nothing else).
+	off := false
+	s2 := site("shop-foo")
+	s2.Spec.ForceHTTPS = &off
+	if ForceHTTPSEnabled(s2) {
+		t.Error("explicit false should disable ForceHTTPS")
+	}
+	if v, ok := configExtra(DesiredDeployment(s2, "mysql", "3306")); ok {
+		t.Errorf("expected no WORDPRESS_CONFIG_EXTRA when off and no phpConfig, got %q", v)
 	}
 }
 

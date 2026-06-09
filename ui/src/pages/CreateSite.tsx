@@ -24,6 +24,7 @@ export default function CreateSite() {
       tablePrefix: v.tablePrefix || "wp_",
       phpConfig: v.phpConfig || undefined,
       phpIni: v.phpIni || undefined,
+      forceHTTPS: v.forceHTTPS,
     };
   }
 
@@ -63,7 +64,7 @@ export default function CreateSite() {
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ replicas: 1, tablePrefix: "wp_", tlsEnabled: false, ingressClass: "nginx" }}
+        initialValues={{ replicas: 1, tablePrefix: "wp_", tlsEnabled: false, ingressClass: "nginx", forceHTTPS: true }}
       >
         <Row gutter={16}>
           <Col span={12}>
@@ -125,6 +126,13 @@ export default function CreateSite() {
             </Form.Item>
           </Col>
         </Row>
+        <Form.Item
+          name="forceHTTPS"
+          label="Force HTTPS trong wp-config (X-Forwarded-Proto) — nên BẬT khi chạy sau proxy/ingress"
+          valuePropName="checked"
+        >
+          <Switch />
+        </Form.Item>
 
         <Divider orientation="left">Advanced</Divider>
         <Form.Item name="phpConfig" label="Extra wp-config.php (WORDPRESS_CONFIG_EXTRA)">

@@ -73,6 +73,13 @@ type WordPressSiteSpec struct {
 	// +kubebuilder:default=wp_
 	TablePrefix string `json:"tablePrefix,omitempty"`
 
+	// ForceHTTPS, when enabled (the DEFAULT when unset), injects
+	// `$_SERVER['HTTP_X_FORWARDED_PROTO'] = 'https';` into wp-config.php so
+	// WordPress behind a TLS-terminating proxy/ingress builds https URLs and
+	// avoids redirect loops. Set to false to turn it off.
+	// +optional
+	ForceHTTPS *bool `json:"forceHTTPS,omitempty"`
+
 	// Suspend stops reconciliation and scales the deployment to zero when true.
 	// +optional
 	Suspend bool `json:"suspend,omitempty"`

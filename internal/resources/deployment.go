@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"strings"
+
 	wpv1 "github.com/benji/wordpress-manager-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -10,6 +12,17 @@ import (
 
 // DefaultImage is used when a site does not pin its own WordPress image.
 const DefaultImage = "wordpress:latest"
+
+// ForceHTTPSSnippet is injected into wp-config.php (via WORDPRESS_CONFIG_EXTRA)
+// so WordPress behind a TLS-terminating proxy/ingress treats the request as
+// HTTPS — avoiding redirect loops and http:// URLs.
+const ForceHTTPSSnippet = "$_SERVER['HTTP_X_FORWARDED_PROTO'] = 'https';"
+
+// ForceHTTPSEnabled reports whether the reverse-proxy HTTPS line is injected.
+// It is ON by default (when spec.forceHTTPS is unset).
+func ForceHTTPSEnabled(site *wpv1.WordPressSite) bool {
+	return site.Spec.ForceHTTPS == nil || *site.Spec.ForceHTTPS
+}
 
 // DesiredDeployment builds the WordPress Deployment for a site. Every replica
 // mounts the SAME ReadWriteMany PVC, but at a per-site subPath, so hosts share
@@ -44,8 +57,17 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 	for _, k := range SaltKeys() {
 		env = append(env, secretEnv(k, secretName, k))
 	}
+	// WORDPRESS_CONFIG_EXTRA = optional reverse-proxy HTTPS line (default on)
+	// + any user-supplied wp-config snippet.
+	var extra []string
+	if ForceHTTPSEnabled(site) {
+		extra = append(extra, ForceHTTPSSnippet)
+	}
 	if site.Spec.PHPConfig != "" {
-		env = append(env, corev1.EnvVar{Name: "WORDPRESS_CONFIG_EXTRA", Value: site.Spec.PHPConfig})
+		extra = append(extra, site.Spec.PHPConfig)
+	}
+	if len(extra) > 0 {
+		env = append(env, corev1.EnvVar{Name: "WORDPRESS_CONFIG_EXTRA", Value: strings.Join(extra, "\n")})
 	}
 	// User-supplied env wins / extends.
 	env = append(env, site.Spec.Env...)

@@ -51,6 +51,7 @@ export interface Site {
   tablePrefix?: string;
   phpConfig?: string;
   phpIni?: string;
+  forceHTTPS?: boolean;
   suspended?: boolean;
   // status (read-only)
   phase?: string;

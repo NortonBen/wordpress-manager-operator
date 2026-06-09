@@ -88,6 +88,7 @@ export default function SiteDetail() {
         tlsEnabled: site.tlsEnabled,
         tlsIssuer: site.tlsIssuer,
         tablePrefix: site.tablePrefix,
+        forceHTTPS: site.forceHTTPS ?? true,
         phpIni: site.phpIni,
         phpConfig: site.phpConfig,
       });
@@ -112,6 +113,7 @@ export default function SiteDetail() {
         tlsEnabled: !!v.tlsEnabled,
         tlsIssuer: v.tlsIssuer || undefined,
         tablePrefix: v.tablePrefix || undefined,
+        forceHTTPS: v.forceHTTPS,
         phpIni: v.phpIni || undefined,
         phpConfig: v.phpConfig || undefined,
       });
@@ -304,6 +306,13 @@ export default function SiteDetail() {
                       </Form.Item>
                     </Col>
                   </Row>
+                  <Form.Item
+                    name="forceHTTPS"
+                    label="Force HTTPS trong wp-config (X-Forwarded-Proto) — nên BẬT khi sau proxy/ingress"
+                    valuePropName="checked"
+                  >
+                    <Switch />
+                  </Form.Item>
 
                   <Divider orientation="left">PHP</Divider>
                   <Form.Item name="phpIni" label="php.ini (để trống = dùng mặc định)">
