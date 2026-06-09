@@ -2,11 +2,10 @@ name: E2E (kind)
 
 # Full-flow smoke test on a throwaway kind cluster: build → install control
 # plane → create a WordPressSite → assert DB/Secret/Service/Ingress + WordPress
-# serving + REST API. Manual by default (heavy); enable PR trigger if desired.
+# serving + REST API. Manual only (it builds images) — images are otherwise
+# built strictly on version tags by docker-publish.yml.
 on:
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
 
 jobs:
   e2e:
