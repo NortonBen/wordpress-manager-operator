@@ -239,3 +239,7 @@ sed -i '' "s#wordpress-manager/ui:latest#ghcr.io/<owner>/wordpress-manager-ui:la
 - Siết `CORS_ORIGINS` về đúng origin của UI.
 - Cân nhắc `NetworkPolicy` để chỉ operator/site được nói chuyện với MySQL.
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 NortonBen
