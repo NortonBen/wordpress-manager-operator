@@ -21,6 +21,10 @@ spec:
         - name: ui
           image: wordpress-manager/ui:latest
           imagePullPolicy: IfNotPresent
+          env:
+            # nginx proxies /api here so login works on direct access too.
+            - name: API_UPSTREAM
+              value: "http://wordpress-apiserver.wordpress-system.svc.cluster.local:80"
           ports:
             - containerPort: 80
               name: http
