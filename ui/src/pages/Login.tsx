@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { Card, Form, Input, Button, Typography, Alert } from "antd";
 import { CloudServerOutlined, SafetyOutlined } from "@ant-design/icons";
 import { login, setToken } from "../api/client";
+import { useT } from "../i18n";
 
 export default function Login() {
   const navigate = useNavigate();
+  const t = useT();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [need2fa, setNeed2fa] = useState(false);
@@ -23,9 +25,9 @@ export default function Login() {
         setNeed2fa(true);
         setError(null);
       } else if (need2fa) {
-        setError("Mã 2FA không đúng");
+        setError(t("login.bad2fa"));
       } else {
-        setError("Sai tài khoản hoặc mật khẩu");
+        setError(t("login.bad"));
       }
     } finally {
       setLoading(false);
@@ -44,7 +46,7 @@ export default function Login() {
             type="info"
             showIcon
             icon={<SafetyOutlined />}
-            message="Nhập mã 6 số từ ứng dụng Authenticator"
+            message={t("login.2faPrompt")}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -56,7 +58,7 @@ export default function Login() {
             <Input.Password disabled={need2fa} />
           </Form.Item>
           {need2fa && (
-            <Form.Item name="totp" label="Mã 2FA" rules={[{ required: true, message: "Nhập mã 2FA" }]}>
+            <Form.Item name="totp" label={t("login.code")} rules={[{ required: true, message: t("login.codeRequired") }]}>
               <Input
                 autoFocus
                 inputMode="numeric"
@@ -67,7 +69,7 @@ export default function Login() {
             </Form.Item>
           )}
           <Button type="primary" htmlType="submit" block loading={loading}>
-            {need2fa ? "Xác minh" : "Sign in"}
+            {need2fa ? t("login.verify") : t("login.signin")}
           </Button>
           {need2fa && (
             <Button
@@ -78,7 +80,7 @@ export default function Login() {
                 setError(null);
               }}
             >
-              ← Đăng nhập lại
+              {t("login.back")}
             </Button>
           )}
         </Form>

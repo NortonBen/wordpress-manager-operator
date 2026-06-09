@@ -5,6 +5,7 @@ import { ReloadOutlined, PlusOutlined, DeleteOutlined, GlobalOutlined } from "@a
 import { listSites, deleteSite, getMetrics, type Site, type MetricsResponse } from "../api/client";
 import ResourceCards from "../components/ResourceCards";
 import { millis, mib } from "../format";
+import { useT } from "../i18n";
 
 const phaseColor: Record<string, string> = {
   Ready: "green",
@@ -15,6 +16,7 @@ const phaseColor: Record<string, string> = {
 };
 
 export default function SitesList() {
+  const t = useT();
   const [sites, setSites] = useState<Site[]>([]);
   const [metrics, setMetrics] = useState<MetricsResponse | undefined>();
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,7 @@ export default function SitesList() {
       setSites(s);
       if (m) setMetrics(m);
     } catch {
-      message.error("Failed to load hosts");
+      message.error(t("sites.loadFail"));
     } finally {
       setLoading(false);
     }
@@ -54,15 +56,15 @@ export default function SitesList() {
     <div>
       <Space style={{ marginBottom: 16, justifyContent: "space-between", width: "100%" }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
-          WordPress hosts
+          {t("sites.title")}
         </Typography.Title>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh}>
-            Refresh
+            {t("sites.refresh")}
           </Button>
           <Link to="/sites/new">
             <Button type="primary" icon={<PlusOutlined />}>
-              Create host
+              {t("sites.create")}
             </Button>
           </Link>
         </Space>

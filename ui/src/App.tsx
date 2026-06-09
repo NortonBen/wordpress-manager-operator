@@ -1,7 +1,8 @@
 import { Navigate, Route, Routes, useNavigate, Link, useLocation } from "react-router-dom";
-import { Layout, Menu, Button, Typography } from "antd";
+import { Layout, Menu, Button, Typography, Select, Switch, Space } from "antd";
 import { CloudServerOutlined, LogoutOutlined, PlusOutlined, SafetyOutlined } from "@ant-design/icons";
 import { clearToken, getToken } from "./api/client";
+import { useSettings } from "./i18n";
 import Login from "./pages/Login";
 import SitesList from "./pages/SitesList";
 import CreateSite from "./pages/CreateSite";
@@ -18,6 +19,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 function Shell({ children }: { children: JSX.Element }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { lang, setLang, theme, setTheme, t } = useSettings();
   const selected = location.pathname.startsWith("/sites/new")
     ? "/sites/new"
     : location.pathname.startsWith("/security")
@@ -35,26 +37,44 @@ function Shell({ children }: { children: JSX.Element }) {
           mode="inline"
           selectedKeys={[selected]}
           items={[
-            { key: "/sites", icon: <CloudServerOutlined />, label: <Link to="/sites">Hosts</Link> },
-            { key: "/sites/new", icon: <PlusOutlined />, label: <Link to="/sites/new">Create host</Link> },
-            { key: "/security", icon: <SafetyOutlined />, label: <Link to="/security">Bảo mật (2FA)</Link> },
+            { key: "/sites", icon: <CloudServerOutlined />, label: <Link to="/sites">{t("nav.hosts")}</Link> },
+            { key: "/sites/new", icon: <PlusOutlined />, label: <Link to="/sites/new">{t("nav.create")}</Link> },
+            { key: "/security", icon: <SafetyOutlined />, label: <Link to="/security">{t("nav.security")}</Link> },
           ]}
         />
       </Sider>
       <Layout>
-        <Header style={{ background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", paddingInline: 24 }}>
+        <Header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingInline: 24 }}>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            WordPress Hosting
+            {t("app.title")}
           </Typography.Title>
-          <Button
-            icon={<LogoutOutlined />}
-            onClick={() => {
-              clearToken();
-              navigate("/login");
-            }}
-          >
-            Logout
-          </Button>
+          <Space>
+            <Select
+              size="small"
+              value={lang}
+              onChange={setLang}
+              style={{ width: 84 }}
+              options={[
+                { value: "vi", label: "🇻🇳 VI" },
+                { value: "en", label: "🇬🇧 EN" },
+              ]}
+            />
+            <Switch
+              checkedChildren="🌙"
+              unCheckedChildren="☀️"
+              checked={theme === "dark"}
+              onChange={(c) => setTheme(c ? "dark" : "light")}
+            />
+            <Button
+              icon={<LogoutOutlined />}
+              onClick={() => {
+                clearToken();
+                navigate("/login");
+              }}
+            >
+              {t("common.logout")}
+            </Button>
+          </Space>
         </Header>
         <Content style={{ margin: 24 }}>{children}</Content>
       </Layout>

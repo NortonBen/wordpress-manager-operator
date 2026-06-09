@@ -2,6 +2,7 @@ import { Card, Col, Progress, Row, Statistic, Tooltip, Tag, Typography } from "a
 import { DashboardOutlined, DatabaseOutlined, CloudServerOutlined } from "@ant-design/icons";
 import type { ClusterMetrics } from "../api/client";
 import { cores, gib, pct } from "../format";
+import { useT } from "../i18n";
 
 const { Text } = Typography;
 
@@ -12,6 +13,7 @@ function barColor(p: number): string {
 }
 
 export default function ResourceCards({ cluster }: { cluster?: ClusterMetrics }) {
+  const t = useT();
   if (!cluster) return null;
 
   const cpuPct = pct(cluster.cpu.used, cluster.cpu.allocatable);
@@ -33,7 +35,7 @@ export default function ResourceCards({ cluster }: { cluster?: ClusterMetrics })
           />
           <Progress percent={cpuPct} strokeColor={barColor(cpuPct)} size="small" />
           <Text type="secondary" data-testid="cpu-available">
-            Còn trống: {cores(cluster.cpu.available)} cores
+            {t("res.free")}: {cores(cluster.cpu.available)} cores
           </Text>
         </Card>
       </Col>
@@ -52,7 +54,7 @@ export default function ResourceCards({ cluster }: { cluster?: ClusterMetrics })
           />
           <Progress percent={memPct} strokeColor={barColor(memPct)} size="small" />
           <Text type="secondary" data-testid="mem-available">
-            Còn trống: {gib(cluster.memory.available)} GiB
+            {t("res.free")}: {gib(cluster.memory.available)} GiB
           </Text>
         </Card>
       </Col>
