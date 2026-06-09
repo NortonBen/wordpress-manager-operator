@@ -5,6 +5,7 @@ import { clearToken, getToken } from "./api/client";
 import Login from "./pages/Login";
 import SitesList from "./pages/SitesList";
 import CreateSite from "./pages/CreateSite";
+import SiteDetail from "./pages/SiteDetail";
 
 const { Header, Content, Sider } = Layout;
 
@@ -75,6 +76,16 @@ export default function App() {
           <RequireAuth>
             <Shell>
               <CreateSite />
+            </Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/sites/:name"
+        element={
+          <RequireAuth>
+            <Shell>
+              <SiteDetail />
             </Shell>
           </RequireAuth>
         }

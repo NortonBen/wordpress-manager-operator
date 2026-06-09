@@ -199,6 +199,167 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+func TestSiteDetailYAML(t *testing.T) {
+	h := newTestServer(t)
+	tok := loginToken(t, h)
+	if w := req(t, h, "POST", "/api/v1/sites", tok,
+		`{"name":"blog-acme","domain":"blog.acme.example","replicas":1}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+
+	w := req(t, h, "GET", "/api/v1/sites/blog-acme/yaml", tok, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("get yaml: %d", w.Code)
+	}
+	var out struct {
+		Source   string `json:"source"`
+		Rendered string `json:"rendered"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !strings.Contains(out.Source, "kind: WordPressSite") || !strings.Contains(out.Source, "blog.acme.example") {
+		t.Errorf("source YAML missing CR fields:\n%s", out.Source)
+	}
+	if !strings.Contains(out.Rendered, "kind: Deployment") || !strings.Contains(out.Rendered, "kind: Ingress") {
+		t.Errorf("rendered YAML missing manifests:\n%s", out.Rendered)
+	}
+}
+
+func TestManualYAMLUpdate(t *testing.T) {
+	h := newTestServer(t)
+	tok := loginToken(t, h)
+	if w := req(t, h, "POST", "/api/v1/sites", tok,
+		`{"name":"blog-acme","domain":"blog.acme.example","replicas":1}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+
+	// Hand-edited YAML: change image + replicas + add an env var.
+	edited := `apiVersion: wp.benji.dev/v1alpha1
+kind: WordPressSite
+metadata:
+  name: blog-acme
+  namespace: wordpress-sites
+spec:
+  domain: blog.acme.example
+  image: wordpress:6.6-php8.2-apache
+  replicas: 3
+  env:
+    - name: WORDPRESS_DEBUG
+      value: "1"
+`
+	if w := req(t, h, "PUT", "/api/v1/sites/blog-acme/yaml", tok, edited); w.Code != http.StatusOK {
+		t.Fatalf("put yaml: %d (%s)", w.Code, w.Body.String())
+	}
+
+	// The change is persisted.
+	w := req(t, h, "GET", "/api/v1/sites/blog-acme", tok, "")
+	var dto SiteDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &dto)
+	if dto.Image != "wordpress:6.6-php8.2-apache" || dto.Replicas != 3 {
+		t.Errorf("manual update not applied: %+v", dto)
+	}
+
+	// Mismatched name is rejected.
+	bad := strings.Replace(edited, "name: blog-acme", "name: someone-else", 1)
+	if w := req(t, h, "PUT", "/api/v1/sites/blog-acme/yaml", tok, bad); w.Code != http.StatusBadRequest {
+		t.Errorf("name mismatch should be 400, got %d", w.Code)
+	}
+}
+
+func TestStructuredUpdatePreservesUnmodeledFields(t *testing.T) {
+	h := newTestServer(t)
+	tok := loginToken(t, h)
+	// Seed with an env var via YAML (env is not in the DTO).
+	if w := req(t, h, "POST", "/api/v1/sites", tok,
+		`{"name":"blog-acme","domain":"blog.acme.example","replicas":1}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+	envYAML := `apiVersion: wp.benji.dev/v1alpha1
+kind: WordPressSite
+metadata: {name: blog-acme, namespace: wordpress-sites}
+spec:
+  domain: blog.acme.example
+  env:
+    - {name: KEEP_ME, value: "yes"}
+`
+	if w := req(t, h, "PUT", "/api/v1/sites/blog-acme/yaml", tok, envYAML); w.Code != http.StatusOK {
+		t.Fatalf("seed env: %d", w.Code)
+	}
+	// Structured update (no env field) must NOT wipe the env var.
+	if w := req(t, h, "PUT", "/api/v1/sites/blog-acme", tok,
+		`{"domain":"blog.acme.example","replicas":2}`); w.Code != http.StatusOK {
+		t.Fatalf("structured update: %d", w.Code)
+	}
+	w := req(t, h, "GET", "/api/v1/sites/blog-acme/yaml", tok, "")
+	var out struct {
+		Source string `json:"source"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !strings.Contains(out.Source, "KEEP_ME") {
+		t.Errorf("structured update wiped the env var:\n%s", out.Source)
+	}
+}
+
+func TestPHPIni(t *testing.T) {
+	h := newTestServer(t)
+	tok := loginToken(t, h)
+	if w := req(t, h, "POST", "/api/v1/sites", tok,
+		`{"name":"blog-acme","domain":"blog.acme.example","phpIni":"memory_limit = 256M\nupload_max_filesize = 64M\n"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+	// DTO round-trips php.ini.
+	w := req(t, h, "GET", "/api/v1/sites/blog-acme", tok, "")
+	var dto SiteDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &dto)
+	if !strings.Contains(dto.PHPIni, "memory_limit = 256M") {
+		t.Errorf("php.ini not round-tripped: %q", dto.PHPIni)
+	}
+	// Rendered manifests mount the php.ini ConfigMap into conf.d.
+	w = req(t, h, "GET", "/api/v1/sites/blog-acme/yaml", tok, "")
+	var out struct {
+		Source   string `json:"source"`
+		Rendered string `json:"rendered"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if !strings.Contains(out.Source, "phpIni") {
+		t.Errorf("source YAML missing phpIni:\n%s", out.Source)
+	}
+	if !strings.Contains(out.Rendered, "php-config") || !strings.Contains(out.Rendered, "conf.d") {
+		t.Errorf("rendered manifests missing php.ini mount:\n%s", out.Rendered)
+	}
+}
+
+func TestSuspendResume(t *testing.T) {
+	h := newTestServer(t)
+	tok := loginToken(t, h)
+	if w := req(t, h, "POST", "/api/v1/sites", tok,
+		`{"name":"blog-acme","domain":"blog.acme.example","replicas":1}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+
+	get := func() SiteDTO {
+		w := req(t, h, "GET", "/api/v1/sites/blog-acme", tok, "")
+		var d SiteDTO
+		_ = json.Unmarshal(w.Body.Bytes(), &d)
+		return d
+	}
+
+	if get().Suspended {
+		t.Fatal("new site should not be suspended")
+	}
+	if w := req(t, h, "POST", "/api/v1/sites/blog-acme/suspend", tok, ""); w.Code != http.StatusOK {
+		t.Fatalf("suspend: %d", w.Code)
+	}
+	if !get().Suspended {
+		t.Error("site should be suspended")
+	}
+	if w := req(t, h, "POST", "/api/v1/sites/blog-acme/resume", tok, ""); w.Code != http.StatusOK {
+		t.Fatalf("resume: %d", w.Code)
+	}
+	if get().Suspended {
+		t.Error("site should be resumed")
+	}
+}
+
 func TestPreviewYAML(t *testing.T) {
 	h := newTestServer(t)
 	tok := loginToken(t, h)

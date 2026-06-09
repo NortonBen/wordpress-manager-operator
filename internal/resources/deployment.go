@@ -9,7 +9,7 @@ import (
 )
 
 // DefaultImage is used when a site does not pin its own WordPress image.
-const DefaultImage = "wordpress:6.7-php8.3-apache"
+const DefaultImage = "wordpress:latest"
 
 // DesiredDeployment builds the WordPress Deployment for a site. Every replica
 // mounts the SAME ReadWriteMany PVC, but at a per-site subPath, so hosts share
@@ -65,6 +65,40 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 		}
 	}
 
+	volumeMounts := []corev1.VolumeMount{{
+		Name:      "site-data",
+		MountPath: "/var/www/html",
+		SubPath:   SubPath(site),
+	}}
+	volumes := []corev1.Volume{{
+		Name: "site-data",
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: SharedPVCName(site),
+			},
+		},
+	}}
+
+	// Mount php.ini (default or custom) into PHP's conf.d scan dir. The hash
+	// annotation forces a rollout (so PHP reloads) whenever it is edited.
+	podAnnotations := map[string]string{
+		"wp.benji.dev/php-ini-hash": PHPIniHash(site),
+	}
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "php-config",
+		MountPath: PHPMountPath,
+		SubPath:   PHPIniFileName,
+		ReadOnly:  true,
+	})
+	volumes = append(volumes, corev1.Volume{
+		Name: "php-config",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: PHPConfigMapName(site)},
+			},
+		},
+	})
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      site.Name,
@@ -76,30 +110,19 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 			Selector: &metav1.LabelSelector{MatchLabels: selector(site)},
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: Labels(site)},
+				ObjectMeta: metav1.ObjectMeta{Labels: Labels(site), Annotations: podAnnotations},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Name:  "wordpress",
-						Image: image,
-						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 80}},
-						Env:   env,
-						VolumeMounts: []corev1.VolumeMount{{
-							Name:      "site-data",
-							MountPath: "/var/www/html",
-							SubPath:   SubPath(site),
-						}},
+						Name:           "wordpress",
+						Image:          image,
+						Ports:          []corev1.ContainerPort{{Name: "http", ContainerPort: 80}},
+						Env:            env,
+						VolumeMounts:   volumeMounts,
 						Resources:      site.Spec.Resources,
 						ReadinessProbe: probe(20),
 						LivenessProbe:  probe(60),
 					}},
-					Volumes: []corev1.Volume{{
-						Name: "site-data",
-						VolumeSource: corev1.VolumeSource{
-							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-								ClaimName: SharedPVCName(site),
-							},
-						},
-					}},
+					Volumes: volumes,
 				},
 			},
 		},

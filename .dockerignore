@@ -12,3 +12,5 @@ config
 hack
 install.yaml
 .DS_Store
+.dev
+.playwright-mcp

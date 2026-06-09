@@ -104,6 +104,8 @@ spec:
                     x-kubernetes-preserve-unknown-fields: true
                 phpConfig:
                   type: string
+                phpIni:
+                  type: string
                 tablePrefix:
                   type: string
                   default: wp_
@@ -140,7 +142,7 @@ rules:
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
-    resources: ["services", "secrets"]
+    resources: ["services", "secrets", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]

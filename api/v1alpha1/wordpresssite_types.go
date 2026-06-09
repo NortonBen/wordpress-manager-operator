@@ -61,6 +61,13 @@ type WordPressSiteSpec struct {
 	// +optional
 	PHPConfig string `json:"phpConfig,omitempty"`
 
+	// PHPIni is raw php.ini content mounted into the PHP conf.d scan directory,
+	// letting you tune PHP runtime settings (memory_limit, upload_max_filesize,
+	// max_execution_time, ...). The WordPress pod is rolled out automatically
+	// whenever this value changes, so edits re-apply on the fly.
+	// +optional
+	PHPIni string `json:"phpIni,omitempty"`
+
 	// TablePrefix sets the WordPress table prefix. Defaults to "wp_".
 	// +optional
 	// +kubebuilder:default=wp_

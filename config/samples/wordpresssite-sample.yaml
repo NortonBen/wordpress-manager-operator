@@ -7,7 +7,7 @@ spec:
   domain: blog.acme.example
   aliases:
     - www.blog.acme.example
-  # image: wordpress:6.7-php8.3-apache   # optional override
+  # image: wordpress:latest   # optional override (default: wordpress:latest)
   replicas: 1
   tablePrefix: wp_
   tls:
@@ -25,6 +25,12 @@ spec:
   phpConfig: |
     define('WP_MEMORY_LIMIT', '256M');
     define('DISALLOW_FILE_EDIT', true);
+  # php.ini runtime settings (mounted into PHP conf.d; pod rolls out on change):
+  phpIni: |
+    upload_max_filesize = 64M
+    post_max_size = 64M
+    memory_limit = 256M
+    max_execution_time = 120
 # The operator will, on apply:
 #   1. create database  wp_blog_acme  and user  wpu_blog_acme  (random password)
 #   2. create Secret    blog-acme-wp  (DB password + WP salts)

@@ -129,6 +129,11 @@ func (r *WordPressSiteReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (r *WordPressSiteReconciler) reconcileWorkload(ctx context.Context, site *wpv1.WordPressSite) error {
+	// php.ini ConfigMap (default or custom) must exist before the Deployment
+	// mounts it.
+	if err := r.apply(ctx, site, resources.DesiredPHPConfigMap(site)); err != nil {
+		return err
+	}
 	if err := r.apply(ctx, site, resources.DesiredDeployment(site, r.DBHost, r.DBPort)); err != nil {
 		return err
 	}
@@ -271,6 +276,7 @@ func (r *WordPressSiteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
 		Owns(&netv1.Ingress{}).
 		Complete(r)
 }

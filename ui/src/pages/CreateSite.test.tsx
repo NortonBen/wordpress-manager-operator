@@ -45,6 +45,20 @@ describe("CreateSite page", () => {
     });
   });
 
+  it("includes php.ini in the create payload", async () => {
+    mockedCreate.mockResolvedValue({ name: "blog-acme", domain: "blog.acme.example", replicas: 1, tlsEnabled: false });
+    renderCreate();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/^Name/), "blog-acme");
+    await user.type(screen.getByLabelText(/Primary domain/i), "blog.acme.example");
+    await user.type(screen.getByLabelText(/php\.ini/i), "memory_limit = 256M");
+    await user.click(screen.getByRole("button", { name: /create host/i }));
+
+    await waitFor(() => expect(mockedCreate).toHaveBeenCalledTimes(1));
+    expect(mockedCreate.mock.calls[0][0].phpIni).toContain("memory_limit");
+  });
+
   it("requests a YAML preview", async () => {
     mockedPreview.mockResolvedValue("kind: WordPressSite\n");
     renderCreate();

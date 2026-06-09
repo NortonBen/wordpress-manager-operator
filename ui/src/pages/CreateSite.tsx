@@ -23,6 +23,7 @@ export default function CreateSite() {
       ingressClass: v.ingressClass || undefined,
       tablePrefix: v.tablePrefix || "wp_",
       phpConfig: v.phpConfig || undefined,
+      phpIni: v.phpIni || undefined,
     };
   }
 
@@ -91,7 +92,7 @@ export default function CreateSite() {
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item name="image" label="WordPress image (optional)">
-              <Input placeholder="wordpress:6.7-php8.3-apache" />
+              <Input placeholder="wordpress:latest (mặc định)" />
             </Form.Item>
           </Col>
           <Col span={6}>
@@ -127,7 +128,18 @@ export default function CreateSite() {
 
         <Divider orientation="left">Advanced</Divider>
         <Form.Item name="phpConfig" label="Extra wp-config.php (WORDPRESS_CONFIG_EXTRA)">
-          <Input.TextArea rows={4} placeholder="define('WP_MEMORY_LIMIT', '256M');" />
+          <Input.TextArea rows={3} placeholder="define('WP_MEMORY_LIMIT', '256M');" />
+        </Form.Item>
+        <Form.Item
+          name="phpIni"
+          label="php.ini (để trống = dùng mặc định; mount vào conf.d, tự rollout khi đổi)"
+        >
+          <Input.TextArea
+            rows={7}
+            placeholder={
+              "Mặc định nếu để trống:\nfile_uploads = On\nmemory_limit = 256M\nupload_max_filesize = 500M\npost_max_size = 500M\nmax_execution_time = 300\nextension=mysqli"
+            }
+          />
         </Form.Item>
 
         <Space>

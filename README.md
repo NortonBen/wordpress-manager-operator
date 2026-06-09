@@ -66,11 +66,30 @@ các vòng lặp (không xoay vòng credential đang chạy).
 `spec.domain` (+ `aliases`) sinh ra Ingress trỏ về Service của site, kèm TLS qua cert-manager khi
 `spec.tls.enabled`. Có thể tùy biến bằng `spec.ingressClassName` và `spec.ingressAnnotations`.
 
-### 5. Custom cao qua YAML
-- `spec.env`, `spec.phpConfig` (→ `WORDPRESS_CONFIG_EXTRA`), `spec.resources`, `spec.replicas`,
-  `spec.image`, `spec.ingressAnnotations` cho phép tùy biến sâu.
-- UI có nút **Preview YAML** (`POST /api/v1/sites/preview`) hiển thị đúng manifest operator sẽ sinh ra
-  trước khi tạo.
+### 5. Custom cao qua YAML — sửa tay
+- `spec.env`, `spec.phpConfig` (→ `WORDPRESS_CONFIG_EXTRA`, code wp-config.php), `spec.resources`,
+  `spec.replicas`, `spec.image` (mặc định **`wordpress:latest`**), `spec.ingressAnnotations`.
+- **`spec.phpIni`** — nội dung **php.ini** (memory_limit, upload_max_filesize, max_execution_time…).
+  Operator tạo ConfigMap và mount vào `/usr/local/etc/php/conf.d/zz-wpmgr.ini`; khi **edit php.ini**,
+  pod **tự rollout** (annotation hash đổi) nên PHP nạp lại cấu hình ngay. Cài qua form lúc tạo host hoặc
+  sửa tay trong tab YAML của trang chi tiết. **Để trống → dùng php.ini mặc định**:
+  ```ini
+  file_uploads = On
+  memory_limit = 256M
+  upload_max_filesize = 500M
+  post_max_size = 500M
+  max_execution_time = 300
+  extension=mysqli
+  ```
+- **Trang chi tiết host** (`/sites/<name>`) hiển thị thông tin + **YAML đã deploy**, cho phép **sửa tay**
+  WordPressSite rồi Lưu — operator reconcile lại. Tab "Manifests đã deploy" xem read-only
+  Deployment/Service/Ingress.
+- Editor có **kiểm tra YAML phía client** (parse js-yaml) — báo lỗi cú pháp và **chặn Lưu** khi YAML sai.
+- **Tạm dừng / Kích hoạt** host ngay trên trang chi tiết (`spec.suspend` → operator scale Deployment về 0,
+  phase `Suspended`).
+- API: `GET /api/v1/sites/{name}/yaml` (source CR + rendered manifests), `PUT …/yaml` (sửa tay toàn bộ
+  spec), `PUT /api/v1/sites/{name}` (sửa nhanh các trường thường dùng, giữ nguyên env/resources…),
+  `POST /api/v1/sites/{name}/suspend` · `…/resume`, `POST /api/v1/sites/preview` (xem trước khi tạo).
 
 ### 6. Theo dõi tài nguyên (CPU/RAM) trên UI
 `GET /api/v1/metrics` trả về CPU & RAM cấp cụm — **đã dùng / capacity / allocatable / còn trống** —

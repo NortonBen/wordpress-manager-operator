@@ -76,7 +76,11 @@ export default function SitesList() {
         dataSource={sites}
         pagination={false}
         columns={[
-          { title: "Name", dataIndex: "name" },
+          {
+            title: "Name",
+            dataIndex: "name",
+            render: (n: string) => <Link to={`/sites/${n}`}>{n}</Link>,
+          },
           {
             title: "Domain",
             dataIndex: "domain",

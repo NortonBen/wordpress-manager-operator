@@ -82,6 +82,8 @@ spec:
                     x-kubernetes-preserve-unknown-fields: true
                 phpConfig:
                   type: string
+                phpIni:
+                  type: string
                 tablePrefix:
                   type: string
                   default: wp_

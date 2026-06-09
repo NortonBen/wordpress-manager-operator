@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	wpv1 "github.com/benji/wordpress-manager-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -40,12 +41,23 @@ func TestDeploymentSharedVolumeSubPath(t *testing.T) {
 	dep := DesiredDeployment(s, "mysql", "3306")
 
 	c := dep.Spec.Template.Spec.Containers[0]
-	if len(c.VolumeMounts) != 1 || c.VolumeMounts[0].SubPath != "shop-foo" {
-		t.Fatalf("expected single mount with subPath=shop-foo, got %+v", c.VolumeMounts)
+	var siteMount *corev1.VolumeMount
+	for i := range c.VolumeMounts {
+		if c.VolumeMounts[i].Name == "site-data" {
+			siteMount = &c.VolumeMounts[i]
+		}
 	}
-	vol := dep.Spec.Template.Spec.Volumes[0]
-	if vol.PersistentVolumeClaim == nil || vol.PersistentVolumeClaim.ClaimName != DefaultSharedPVCName {
-		t.Fatalf("expected shared PVC %q, got %+v", DefaultSharedPVCName, vol.VolumeSource)
+	if siteMount == nil || siteMount.SubPath != "shop-foo" {
+		t.Fatalf("expected site-data mount with subPath=shop-foo, got %+v", c.VolumeMounts)
+	}
+	var siteVol *corev1.Volume
+	for i := range dep.Spec.Template.Spec.Volumes {
+		if dep.Spec.Template.Spec.Volumes[i].Name == "site-data" {
+			siteVol = &dep.Spec.Template.Spec.Volumes[i]
+		}
+	}
+	if siteVol == nil || siteVol.PersistentVolumeClaim == nil || siteVol.PersistentVolumeClaim.ClaimName != DefaultSharedPVCName {
+		t.Fatalf("expected shared PVC %q for site-data", DefaultSharedPVCName)
 	}
 
 	// DB env wired from the per-site secret.
@@ -76,6 +88,45 @@ func TestSecretPreservesExistingPassword(t *testing.T) {
 		if len(second.Data[k]) == 0 {
 			t.Errorf("salt %s missing", k)
 		}
+	}
+}
+
+func TestPHPIniMountedAndHashed(t *testing.T) {
+	s := site("blog-acme")
+
+	// No custom php.ini → the DEFAULT php.ini is applied (always mounted).
+	if EffectivePHPIni(s) != DefaultPHPIni {
+		t.Fatal("empty phpIni should fall back to DefaultPHPIni")
+	}
+	cm := DesiredPHPConfigMap(s)
+	if cm.Name != "blog-acme-php" || cm.Data[PHPIniFileName] != DefaultPHPIni {
+		t.Fatalf("configmap should carry the default php.ini: %+v", cm.Data)
+	}
+
+	dep := DesiredDeployment(s, "mysql", "3306")
+	c := dep.Spec.Template.Spec.Containers[0]
+	var mounted bool
+	for _, vm := range c.VolumeMounts {
+		if vm.Name == "php-config" && vm.MountPath == PHPMountPath && vm.SubPath == PHPIniFileName {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Errorf("php.ini not mounted into conf.d: %+v", c.VolumeMounts)
+	}
+	defaultHash := dep.Spec.Template.ObjectMeta.Annotations["wp.benji.dev/php-ini-hash"]
+	if defaultHash == "" {
+		t.Error("expected php-ini-hash pod annotation")
+	}
+
+	// Custom php.ini overrides the default and changes the hash → rollout.
+	s.Spec.PHPIni = "memory_limit = 1024M\n"
+	if EffectivePHPIni(s) != s.Spec.PHPIni {
+		t.Error("custom phpIni should override the default")
+	}
+	dep2 := DesiredDeployment(s, "mysql", "3306")
+	if dep2.Spec.Template.ObjectMeta.Annotations["wp.benji.dev/php-ini-hash"] == defaultHash {
+		t.Error("hash should change when php.ini changes")
 	}
 }
 

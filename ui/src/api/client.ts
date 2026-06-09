@@ -50,6 +50,8 @@ export interface Site {
   ingressClass?: string;
   tablePrefix?: string;
   phpConfig?: string;
+  phpIni?: string;
+  suspended?: boolean;
   // status (read-only)
   phase?: string;
   url?: string;
@@ -72,8 +74,46 @@ export async function createSite(site: Partial<Site>): Promise<Site> {
   return data;
 }
 
+export async function getSite(name: string): Promise<Site> {
+  const { data } = await api.get<Site>(`/sites/${name}`);
+  return data;
+}
+
+export async function updateSite(name: string, site: Partial<Site>): Promise<Site> {
+  const { data } = await api.put<Site>(`/sites/${name}`, site);
+  return data;
+}
+
 export async function deleteSite(name: string): Promise<void> {
   await api.delete(`/sites/${name}`);
+}
+
+export interface SiteYAML {
+  source: string; // editable WordPressSite CR
+  rendered: string; // read-only deployed manifests
+}
+
+export async function getSiteYAML(name: string): Promise<SiteYAML> {
+  const { data } = await api.get<SiteYAML>(`/sites/${name}/yaml`);
+  return data;
+}
+
+export async function updateSiteYAML(name: string, yaml: string): Promise<Site> {
+  const { data } = await api.put<Site>(`/sites/${name}/yaml`, yaml, {
+    headers: { "Content-Type": "application/x-yaml" },
+    transformRequest: [(d) => d], // send raw string, don't JSON-encode
+  });
+  return data;
+}
+
+export async function suspendSite(name: string): Promise<Site> {
+  const { data } = await api.post<Site>(`/sites/${name}/suspend`);
+  return data;
+}
+
+export async function resumeSite(name: string): Promise<Site> {
+  const { data } = await api.post<Site>(`/sites/${name}/resume`);
+  return data;
 }
 
 export async function previewYAML(site: Partial<Site>): Promise<string> {
