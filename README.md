@@ -49,8 +49,14 @@ Xem các trường trong [`api/v1alpha1/wordpresssite_types.go`](api/v1alpha1/wo
 ### 2. Storage dùng chung, tách folder con
 Tất cả site **mount cùng một PVC `ReadWriteMany`** (`wordpress-shared`) nhưng mỗi pod mount tại
 `subPath = <tên site>`. Nhờ vậy chia sẻ một volume lớn mà file mỗi host vẫn cô lập trong thư mục riêng.
-> RWX cần storage backend chia sẻ: NFS / CephFS / Longhorn-RWX / EFS / Azure Files / Filestore.
-> Đặt `storageClassName` trong [`deploy/04-shared-storage.yaml`](deploy/04-shared-storage.yaml).
+
+[`deploy/04-shared-storage.yaml`](deploy/04-shared-storage.yaml) **tạo sẵn một PV hostPath RWX** và bind
+PVC vào đó (`storageClassName: ""`) → chạy được ngay trên **kind/minikube/1-node** (các provisioner mặc
+định như `local-path` KHÔNG hỗ trợ RWX nên PVC sẽ kẹt `Pending`).
+> ⚠️ hostPath chỉ đúng cho **1 node**. **Multi-node production**: thay PV này bằng RWX thật
+> (NFS/CephFS/Longhorn-RWX/EFS/Azure Files/Filestore) hoặc StorageClass RWX động.
+> Nếu PVC cũ đã `Pending` với class khác (vd `local-path`), phải **xoá rồi tạo lại** vì
+> `storageClassName` bất biến: `kubectl -n wordpress-sites delete pvc wordpress-shared` rồi apply lại.
 
 ### 3. Database tách biệt & bảo mật theo từng host
 Khi tạo site, operator dùng quyền admin MySQL để:

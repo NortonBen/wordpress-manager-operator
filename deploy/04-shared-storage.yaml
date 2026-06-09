@@ -2,9 +2,36 @@
 # but each at its own subPath (the site name), so hosts share one volume while
 # their files stay isolated in separate sub-folders.
 #
-# IMPORTANT: ReadWriteMany requires a shared-filesystem provisioner —
-# e.g. NFS (nfs-subdir-external-provisioner), CephFS, Longhorn-RWX, AWS EFS,
-# Azure Files, GCP Filestore. Set storageClassName to that provisioner.
+# Most default provisioners (kind/minikube "local-path", hostpath) only support
+# ReadWriteOnce, so a dynamically-provisioned RWX PVC stays Pending forever.
+# To work out of the box we PRE-CREATE a static hostPath PV with RWX and bind
+# the PVC to it explicitly (storageClassName: "" disables dynamic provisioning).
+#
+# ⚠️ hostPath is single-node only (kind / minikube / one-node clusters). For
+# MULTI-NODE production replace this PV with a real shared filesystem — NFS,
+# CephFS, Longhorn-RWX, AWS EFS, Azure Files, GCP Filestore — or a dynamic RWX
+# StorageClass, and point the PVC at it (drop volumeName/claimRef, set the class).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: wordpress-shared-pv
+  labels:
+    app.kubernetes.io/part-of: wordpress-manager-operator
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: "" # static binding, no dynamic provisioner
+  # Pre-bind to the exact claim so nothing else can grab this PV.
+  claimRef:
+    namespace: wordpress-sites
+    name: wordpress-shared
+  hostPath:
+    path: /var/lib/wordpress-shared
+    type: DirectoryOrCreate
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -15,7 +42,8 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  # storageClassName: nfs-client    # <-- set to your RWX storage class
+  storageClassName: "" # empty → bind to the static PV above, skip local-path
+  volumeName: wordpress-shared-pv
   resources:
     requests:
       storage: 50Gi

@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Card, Descriptions, Tabs, Input, Button, Space, Tag, message, Spin, Typography, Alert, Tooltip, Table, Empty,
+  Card, Descriptions, Tabs, Input, InputNumber, Switch, Form, Row, Col, Divider,
+  Button, Space, Tag, message, Spin, Typography, Alert, Tooltip, Table, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, SaveOutlined, ReloadOutlined, GlobalOutlined, CodeOutlined, FileTextOutlined,
-  PauseCircleOutlined, PlayCircleOutlined, ProfileOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, ProfileOutlined, SettingOutlined,
 } from "@ant-design/icons";
 import yaml from "js-yaml";
 import {
-  getSite, getSiteYAML, updateSiteYAML, suspendSite, resumeSite, getMetrics, getSiteStatus,
+  getSite, getSiteYAML, updateSite, updateSiteYAML, suspendSite, resumeSite, getMetrics, getSiteStatus,
   type Site, type SiteYAML, type SiteUsage, type SiteStatus, type PodStatus, type SiteEvent,
 } from "../api/client";
 import { millis, mib } from "../format";
@@ -40,7 +41,9 @@ export default function SiteDetail() {
   const [status, setStatus] = useState<SiteStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingForm, setSavingForm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [form] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,6 +75,54 @@ export default function SiteDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Populate the structured form whenever the site loads/reloads.
+  useEffect(() => {
+    if (site) {
+      form.setFieldsValue({
+        domain: site.domain,
+        aliases: (site.aliases ?? []).join(", "),
+        image: site.image,
+        replicas: site.replicas,
+        ingressClass: site.ingressClass,
+        tlsEnabled: site.tlsEnabled,
+        tlsIssuer: site.tlsIssuer,
+        tablePrefix: site.tablePrefix,
+        phpIni: site.phpIni,
+        phpConfig: site.phpConfig,
+      });
+    }
+  }, [site, form]);
+
+  async function saveForm() {
+    let v: any;
+    try {
+      v = await form.validateFields();
+    } catch {
+      return;
+    }
+    setSavingForm(true);
+    try {
+      await updateSite(name, {
+        domain: v.domain,
+        aliases: v.aliases ? v.aliases.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
+        image: v.image || undefined,
+        replicas: v.replicas ?? 1,
+        ingressClass: v.ingressClass || undefined,
+        tlsEnabled: !!v.tlsEnabled,
+        tlsIssuer: v.tlsIssuer || undefined,
+        tablePrefix: v.tablePrefix || undefined,
+        phpIni: v.phpIni || undefined,
+        phpConfig: v.phpConfig || undefined,
+      });
+      message.success("Đã lưu cấu hình — đang reconcile");
+      await load();
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || "Lưu thất bại");
+    } finally {
+      setSavingForm(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -187,12 +238,98 @@ export default function SiteDetail() {
       </Card>
 
       <Tabs
+        defaultActiveKey="form"
         items={[
+          {
+            key: "form",
+            label: (
+              <span>
+                <SettingOutlined /> Cấu hình
+              </span>
+            ),
+            children: (
+              <Card size="small">
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="Chọn & nhập các trường thường dùng rồi Lưu — không cần viết YAML. Cấu hình nâng cao (env, resources…) vẫn được giữ nguyên."
+                />
+                <Form form={form} layout="vertical">
+                  <Row gutter={16}>
+                    <Col xs={24} md={12}>
+                      <Form.Item name="domain" label="Domain" rules={[{ required: true, message: "Nhập domain" }]}>
+                        <Input placeholder="blog.acme.example" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={12}>
+                      <Form.Item name="aliases" label="Domain aliases (phân cách bằng dấu phẩy)">
+                        <Input placeholder="www.blog.acme.example" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={16}>
+                    <Col xs={24} md={12}>
+                      <Form.Item name="image" label="WordPress image">
+                        <Input placeholder="wordpress:latest (mặc định)" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="replicas" label="Replicas">
+                        <InputNumber min={0} max={10} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="tablePrefix" label="Table prefix">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Divider orientation="left">Ingress &amp; TLS</Divider>
+                  <Row gutter={16}>
+                    <Col xs={24} md={8}>
+                      <Form.Item name="ingressClass" label="Ingress class">
+                        <Input placeholder="nginx" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={8} md={4}>
+                      <Form.Item name="tlsEnabled" label="HTTPS" valuePropName="checked">
+                        <Switch />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={16} md={12}>
+                      <Form.Item name="tlsIssuer" label="cert-manager ClusterIssuer">
+                        <Input placeholder="letsencrypt-prod" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Divider orientation="left">PHP</Divider>
+                  <Form.Item name="phpIni" label="php.ini (để trống = dùng mặc định)">
+                    <Input.TextArea rows={5} placeholder={"memory_limit = 256M\nupload_max_filesize = 500M"} />
+                  </Form.Item>
+                  <Form.Item name="phpConfig" label="Extra wp-config.php (WORDPRESS_CONFIG_EXTRA)">
+                    <Input.TextArea rows={3} placeholder="define('WP_MEMORY_LIMIT', '256M');" />
+                  </Form.Item>
+
+                  <Space>
+                    <Button type="primary" icon={<SaveOutlined />} loading={savingForm} onClick={saveForm}>
+                      Lưu &amp; Apply
+                    </Button>
+                    <Button icon={<ReloadOutlined />} onClick={load}>
+                      Tải lại
+                    </Button>
+                  </Space>
+                </Form>
+              </Card>
+            ),
+          },
           {
             key: "config",
             label: (
               <span>
-                <CodeOutlined /> Cấu hình YAML (sửa tay)
+                <CodeOutlined /> YAML (nâng cao)
               </span>
             ),
             children: !yamlDoc ? (

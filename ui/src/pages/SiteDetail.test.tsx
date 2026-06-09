@@ -8,6 +8,7 @@ import * as client from "../api/client";
 vi.mock("../api/client", () => ({
   getSite: vi.fn(),
   getSiteYAML: vi.fn(),
+  updateSite: vi.fn(),
   updateSiteYAML: vi.fn(),
   suspendSite: vi.fn(),
   resumeSite: vi.fn(),
@@ -17,10 +18,16 @@ vi.mock("../api/client", () => ({
 
 const mGetSite = vi.mocked(client.getSite);
 const mGetYAML = vi.mocked(client.getSiteYAML);
+const mUpdate = vi.mocked(client.updateSite);
 const mUpdateYAML = vi.mocked(client.updateSiteYAML);
 const mSuspend = vi.mocked(client.suspendSite);
 const mMetrics = vi.mocked(client.getMetrics);
 const mStatus = vi.mocked(client.getSiteStatus);
+
+// The YAML editor lives in a non-default tab now; switch to it first.
+async function gotoYamlTab() {
+  await userEvent.click(await screen.findByRole("tab", { name: /YAML/ }));
+}
 
 const SOURCE = `apiVersion: wp.benji.dev/v1alpha1
 kind: WordPressSite
@@ -62,11 +69,29 @@ describe("SiteDetail page", () => {
     mStatus.mockResolvedValue({ phase: "Ready", conditions: [], pods: [], events: [] });
   });
 
+  it("updates the domain via the structured form", async () => {
+    mUpdate.mockResolvedValue({} as any);
+    renderDetail();
+
+    // Form tab is the default; the domain field is pre-filled.
+    const domain = (await screen.findByLabelText("Domain")) as HTMLInputElement;
+    expect(domain.value).toBe("blog.acme.example");
+
+    await userEvent.clear(domain);
+    await userEvent.type(domain, "new.acme.example");
+    await userEvent.click(screen.getByRole("button", { name: /Lưu/ }));
+
+    await waitFor(() => expect(mUpdate).toHaveBeenCalled());
+    expect(mUpdate.mock.calls[0][0]).toBe("blog-acme");
+    expect(mUpdate.mock.calls[0][1].domain).toBe("new.acme.example");
+  });
+
   it("shows host details and the editable YAML", async () => {
     renderDetail();
     expect(await screen.findByText("blog.acme.example")).toBeInTheDocument();
     expect(screen.getByText("wp_blog_acme")).toBeInTheDocument();
-    const editor = screen.getByLabelText("WordPressSite YAML") as HTMLTextAreaElement;
+    await gotoYamlTab();
+    const editor = (await screen.findByLabelText("WordPressSite YAML")) as HTMLTextAreaElement;
     expect(editor.value).toContain("kind: WordPressSite");
     expect(editor.value).toContain("domain: blog.acme.example");
   });
@@ -74,6 +99,7 @@ describe("SiteDetail page", () => {
   it("saves hand-edited YAML", async () => {
     mUpdateYAML.mockResolvedValue({} as any);
     renderDetail();
+    await gotoYamlTab();
     const editor = (await screen.findByLabelText("WordPressSite YAML")) as HTMLTextAreaElement;
 
     // Manual edit: bump replicas to 3.
@@ -89,6 +115,7 @@ describe("SiteDetail page", () => {
 
   it("disables Save and shows an error on invalid YAML", async () => {
     renderDetail();
+    await gotoYamlTab();
     const editor = (await screen.findByLabelText("WordPressSite YAML")) as HTMLTextAreaElement;
 
     fireEvent.change(editor, { target: { value: "spec:\n  domain: x\n bad: : :" } });
@@ -111,8 +138,9 @@ describe("SiteDetail page", () => {
     // Host details (from getSite) still show…
     expect(await screen.findByText("blog.acme.example")).toBeInTheDocument();
     expect(screen.getByText("wp_blog_acme")).toBeInTheDocument();
-    // …and the config tab degrades gracefully instead of blanking the page.
-    expect(screen.getByText("Không tải được YAML cấu hình")).toBeInTheDocument();
+    // …and the YAML tab degrades gracefully instead of blanking the page.
+    await gotoYamlTab();
+    expect(await screen.findByText("Không tải được YAML cấu hình")).toBeInTheDocument();
   });
 
   it("shows Resume for a suspended host", async () => {
