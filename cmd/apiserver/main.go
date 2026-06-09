@@ -102,6 +102,13 @@ func main() {
 		DBPort:    dbPort,
 		Reconcile: reconcile,
 		Metrics:   metricsProvider,
+		TwoFA: &apiserver.KubeTwoFA{
+			K8s:        k8s,
+			Namespace:  env("TWOFA_NAMESPACE", "wordpress-system"),
+			SecretName: env("TWOFA_SECRET_NAME", "wordpress-admin-2fa"),
+			Issuer:     env("TWOFA_ISSUER", "WordPress Manager"),
+			Account:    env("ADMIN_USERNAME", "admin"),
+		},
 	}
 
 	origins := strings.Split(env("CORS_ORIGINS", "*"), ",")

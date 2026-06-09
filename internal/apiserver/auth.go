@@ -56,14 +56,19 @@ func NewAuthenticator(username, passwordHash, plaintext, jwtSecret string, ttl t
 	}, nil
 }
 
-// Login verifies credentials and returns a signed JWT on success.
-func (a *Authenticator) Login(username, password string) (string, error) {
+// Username returns the configured admin username.
+func (a *Authenticator) Username() string { return a.username }
+
+// VerifyPassword checks the admin username + password (constant-time via bcrypt).
+func (a *Authenticator) VerifyPassword(username, password string) bool {
 	if username != a.username {
-		return "", errors.New("invalid credentials")
+		return false
 	}
-	if err := bcrypt.CompareHashAndPassword(a.passwordHash, []byte(password)); err != nil {
-		return "", errors.New("invalid credentials")
-	}
+	return bcrypt.CompareHashAndPassword(a.passwordHash, []byte(password)) == nil
+}
+
+// Issue returns a signed JWT for the given subject.
+func (a *Authenticator) Issue(username string) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Subject:   username,
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(a.ttl)),
@@ -73,6 +78,11 @@ func (a *Authenticator) Login(username, password string) (string, error) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString(a.jwtSecret)
 }
+
+// errors used to drive the 2FA login flow.
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+)
 
 func (a *Authenticator) parse(token string) (string, error) {
 	claims := &jwt.RegisteredClaims{}

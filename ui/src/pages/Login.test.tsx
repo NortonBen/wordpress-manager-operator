@@ -33,7 +33,7 @@ describe("Login page", () => {
     await user.type(screen.getByLabelText("Password"), "s3cret");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    await waitFor(() => expect(mockedLogin).toHaveBeenCalledWith("admin", "s3cret"));
+    await waitFor(() => expect(mockedLogin).toHaveBeenCalledWith("admin", "s3cret", undefined));
     expect(mockedSetToken).toHaveBeenCalledWith("jwt-token");
   });
 
@@ -45,7 +45,26 @@ describe("Login page", () => {
     await user.type(screen.getByLabelText("Password"), "wrong");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    expect(await screen.findByText(/invalid username or password/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sai tài khoản hoặc mật khẩu/i)).toBeInTheDocument();
     expect(mockedSetToken).not.toHaveBeenCalled();
+  });
+
+  it("prompts for a 2FA code then logs in", async () => {
+    // First attempt: server says a TOTP code is required.
+    mockedLogin.mockRejectedValueOnce({ response: { data: { error: "totp_required" } } });
+    renderLogin();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Password"), "s3cret");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    // The 2FA field appears.
+    const code = await screen.findByLabelText("Mã 2FA");
+    mockedLogin.mockResolvedValueOnce("jwt-token");
+    await user.type(code, "123456");
+    await user.click(screen.getByRole("button", { name: /Xác minh/ }));
+
+    await waitFor(() => expect(mockedLogin).toHaveBeenLastCalledWith("admin", "s3cret", "123456"));
+    expect(mockedSetToken).toHaveBeenCalledWith("jwt-token");
   });
 });

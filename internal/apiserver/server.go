@@ -27,6 +27,7 @@ type Server struct {
 	DBHost    string
 	DBPort    string
 	Metrics   metrics.Provider // cluster/site CPU+RAM usage
+	TwoFA     TwoFA            // admin TOTP 2FA (nil = disabled)
 
 	// Reconcile, when set (dev mode), is invoked after create/delete so the
 	// mock cluster converges immediately without a separate operator process.
@@ -74,6 +75,11 @@ func (s *Server) Router(corsOrigins []string) http.Handler {
 		pr.Post("/api/v1/sites/{name}/resume", s.setSuspend(false))
 		pr.Get("/api/v1/metrics", s.getMetrics)
 		pr.Get("/api/v1/me", s.me)
+		// Admin 2FA enrollment.
+		pr.Get("/api/v1/2fa", s.twoFAStatus)
+		pr.Post("/api/v1/2fa/setup", s.twoFASetup)
+		pr.Post("/api/v1/2fa/enable", s.twoFAEnable)
+		pr.Post("/api/v1/2fa/disable", s.twoFADisable)
 	})
 	return r
 }
@@ -82,14 +88,31 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TOTP     string `json:"totp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	token, err := s.Auth.Login(body.Username, body.Password)
-	if err != nil {
+	if !s.Auth.VerifyPassword(body.Username, body.Password) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	// Second factor, when enabled for this admin.
+	if s.TwoFA != nil && s.TwoFA.Enabled(r.Context()) {
+		if body.TOTP == "" {
+			// Password OK but a 2FA code is required — tell the UI to prompt.
+			writeError(w, http.StatusUnauthorized, "totp_required")
+			return
+		}
+		if !s.TwoFA.Validate(r.Context(), body.TOTP) {
+			writeError(w, http.StatusUnauthorized, "invalid 2FA code")
+			return
+		}
+	}
+	token, err := s.Auth.Issue(body.Username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not issue token")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})

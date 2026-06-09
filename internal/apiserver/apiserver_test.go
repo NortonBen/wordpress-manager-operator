@@ -37,6 +37,10 @@ func newTestServer(t *testing.T) http.Handler {
 		K8s: k8s, Auth: auth, Namespace: "wordpress-sites",
 		DBHost: "mysql", DBPort: "3306",
 		Metrics: metrics.NewDevProvider(k8s, "wordpress-sites"),
+		TwoFA: &KubeTwoFA{
+			K8s: k8s, Namespace: "wordpress-system",
+			SecretName: "wordpress-admin-2fa", Issuer: "WordPress Manager", Account: "admin",
+		},
 	}
 	return srv.Router([]string{"*"})
 }

@@ -1,11 +1,12 @@
 import { Navigate, Route, Routes, useNavigate, Link, useLocation } from "react-router-dom";
 import { Layout, Menu, Button, Typography } from "antd";
-import { CloudServerOutlined, LogoutOutlined, PlusOutlined } from "@ant-design/icons";
+import { CloudServerOutlined, LogoutOutlined, PlusOutlined, SafetyOutlined } from "@ant-design/icons";
 import { clearToken, getToken } from "./api/client";
 import Login from "./pages/Login";
 import SitesList from "./pages/SitesList";
 import CreateSite from "./pages/CreateSite";
 import SiteDetail from "./pages/SiteDetail";
+import Security from "./pages/Security";
 
 const { Header, Content, Sider } = Layout;
 
@@ -17,7 +18,11 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 function Shell({ children }: { children: JSX.Element }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const selected = location.pathname.startsWith("/sites/new") ? "/sites/new" : "/sites";
+  const selected = location.pathname.startsWith("/sites/new")
+    ? "/sites/new"
+    : location.pathname.startsWith("/security")
+      ? "/security"
+      : "/sites";
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
@@ -32,6 +37,7 @@ function Shell({ children }: { children: JSX.Element }) {
           items={[
             { key: "/sites", icon: <CloudServerOutlined />, label: <Link to="/sites">Hosts</Link> },
             { key: "/sites/new", icon: <PlusOutlined />, label: <Link to="/sites/new">Create host</Link> },
+            { key: "/security", icon: <SafetyOutlined />, label: <Link to="/security">Bảo mật (2FA)</Link> },
           ]}
         />
       </Sider>
@@ -86,6 +92,16 @@ export default function App() {
           <RequireAuth>
             <Shell>
               <SiteDetail />
+            </Shell>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/security"
+        element={
+          <RequireAuth>
+            <Shell>
+              <Security />
             </Shell>
           </RequireAuth>
         }

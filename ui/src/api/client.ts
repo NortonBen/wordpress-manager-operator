@@ -60,9 +60,34 @@ export interface Site {
   databaseUser?: string;
 }
 
-export async function login(username: string, password: string): Promise<string> {
-  const { data } = await api.post<{ token: string }>("/login", { username, password });
+export async function login(username: string, password: string, totp?: string): Promise<string> {
+  const { data } = await api.post<{ token: string }>("/login", { username, password, totp });
   return data.token;
+}
+
+// ---- Admin 2FA (TOTP) ----
+
+export interface TwoFASetup {
+  secret: string;
+  otpauthUrl: string;
+  qr: string; // data:image/png;base64,...
+}
+
+export async function getTwoFA(): Promise<{ enabled: boolean }> {
+  const { data } = await api.get<{ enabled: boolean }>("/2fa");
+  return data;
+}
+export async function setupTwoFA(): Promise<TwoFASetup> {
+  const { data } = await api.post<TwoFASetup>("/2fa/setup");
+  return data;
+}
+export async function enableTwoFA(code: string): Promise<{ enabled: boolean }> {
+  const { data } = await api.post<{ enabled: boolean }>("/2fa/enable", { code });
+  return data;
+}
+export async function disableTwoFA(code: string): Promise<{ enabled: boolean }> {
+  const { data } = await api.post<{ enabled: boolean }>("/2fa/disable", { code });
+  return data;
 }
 
 export async function listSites(): Promise<Site[]> {
