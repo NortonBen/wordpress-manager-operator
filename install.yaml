@@ -183,6 +183,10 @@ rules:
   - apiGroups: ["wp.benji.dev"]
     resources: ["wordpresssites", "wordpresssites/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Diagnostics: pod status + events to explain Error/Pending on the detail page.
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list"]
   # Resource tracing: cluster capacity + live usage for the dashboard.
   - apiGroups: [""]
     resources: ["nodes"]

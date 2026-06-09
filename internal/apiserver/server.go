@@ -69,6 +69,7 @@ func (s *Server) Router(corsOrigins []string) http.Handler {
 		pr.Delete("/api/v1/sites/{name}", s.deleteSite)
 		pr.Get("/api/v1/sites/{name}/yaml", s.getSiteYAML)
 		pr.Put("/api/v1/sites/{name}/yaml", s.updateSiteYAML)
+		pr.Get("/api/v1/sites/{name}/status", s.getSiteStatus)
 		pr.Post("/api/v1/sites/{name}/suspend", s.setSuspend(true))
 		pr.Post("/api/v1/sites/{name}/resume", s.setSuspend(false))
 		pr.Get("/api/v1/metrics", s.getMetrics)

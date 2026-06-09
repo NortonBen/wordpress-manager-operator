@@ -37,6 +37,7 @@ type SiteDTO struct {
 
 	// Read-only status, populated on GET/list.
 	Phase        string `json:"phase,omitempty"`
+	Message      string `json:"message,omitempty"` // latest status condition message
 	URL          string `json:"url,omitempty"`
 	DatabaseName string `json:"databaseName,omitempty"`
 	DatabaseUser string `json:"databaseUser,omitempty"`
@@ -61,6 +62,7 @@ func toDTO(s *wpv1.WordPressSite) SiteDTO {
 		PHPIni:       s.Spec.PHPIni,
 		Suspended:    s.Spec.Suspend,
 		Phase:        s.Status.Phase,
+		Message:      latestConditionMessage(s),
 		URL:          s.Status.URL,
 		DatabaseName: s.Status.DatabaseName,
 		DatabaseUser: s.Status.DatabaseUser,

@@ -12,6 +12,7 @@ vi.mock("../api/client", () => ({
   suspendSite: vi.fn(),
   resumeSite: vi.fn(),
   getMetrics: vi.fn(),
+  getSiteStatus: vi.fn(),
 }));
 
 const mGetSite = vi.mocked(client.getSite);
@@ -19,6 +20,7 @@ const mGetYAML = vi.mocked(client.getSiteYAML);
 const mUpdateYAML = vi.mocked(client.updateSiteYAML);
 const mSuspend = vi.mocked(client.suspendSite);
 const mMetrics = vi.mocked(client.getMetrics);
+const mStatus = vi.mocked(client.getSiteStatus);
 
 const SOURCE = `apiVersion: wp.benji.dev/v1alpha1
 kind: WordPressSite
@@ -57,6 +59,7 @@ describe("SiteDetail page", () => {
       },
       sites: [{ name: "blog-acme", cpuMillicores: 120, memoryBytes: 268435456 }],
     });
+    mStatus.mockResolvedValue({ phase: "Ready", conditions: [], pods: [], events: [] });
   });
 
   it("shows host details and the editable YAML", async () => {
@@ -119,5 +122,47 @@ describe("SiteDetail page", () => {
     });
     renderDetail();
     expect(await screen.findByRole("button", { name: /Kích hoạt/ })).toBeInTheDocument();
+  });
+
+  it("surfaces the error and pod diagnostics", async () => {
+    mGetSite.mockResolvedValue({
+      name: "blog-acme", domain: "blog.acme.example", replicas: 1,
+      tlsEnabled: false, phase: "Error", message: "workload: PVC unbound",
+    });
+    mStatus.mockResolvedValue({
+      phase: "Error",
+      message: "workload: PVC unbound",
+      conditions: [{ type: "Ready", status: "False", reason: "Error", message: "workload: PVC unbound" }],
+      pods: [
+        {
+          name: "blog-acme-abc",
+          phase: "Pending",
+          ready: "0/1",
+          reason: "Unschedulable",
+          message: "pod has unbound immediate PersistentVolumeClaims",
+          restarts: 0,
+        },
+      ],
+      events: [
+        {
+          type: "Warning",
+          reason: "FailedScheduling",
+          message: "0/1 nodes available: unbound PVC",
+          count: 3,
+          object: "Pod/blog-acme-abc",
+          lastSeen: "2026-06-09T00:00:00Z",
+        },
+      ],
+    });
+
+    renderDetail();
+    // Error banner shows the reconcile message.
+    expect(await screen.findByText('Host đang ở trạng thái "Error"')).toBeInTheDocument();
+    expect(screen.getAllByText(/workload: PVC unbound/).length).toBeGreaterThan(0);
+
+    // Status tab reveals the stuck pod reason.
+    await userEvent.click(screen.getByRole("tab", { name: /Trạng thái/ }));
+    expect(await screen.findByText("blog-acme-abc")).toBeInTheDocument();
+    expect(screen.getByText("Unschedulable")).toBeInTheDocument();
   });
 });

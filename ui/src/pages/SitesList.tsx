@@ -93,7 +93,10 @@ export default function SitesList() {
           {
             title: "Phase",
             dataIndex: "phase",
-            render: (p?: string) => <Tag color={phaseColor[p || ""] || "default"}>{p || "Unknown"}</Tag>,
+            render: (p: string | undefined, r) => {
+              const tag = <Tag color={phaseColor[p || ""] || "default"}>{p || "Unknown"}</Tag>;
+              return r.message ? <Tooltip title={r.message}>{tag}</Tooltip> : tag;
+            },
           },
           { title: "Replicas", dataIndex: "replicas", width: 90 },
           {

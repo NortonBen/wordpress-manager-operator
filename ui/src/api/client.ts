@@ -54,6 +54,7 @@ export interface Site {
   suspended?: boolean;
   // status (read-only)
   phase?: string;
+  message?: string;
   url?: string;
   databaseName?: string;
   databaseUser?: string;
@@ -103,6 +104,46 @@ export async function updateSiteYAML(name: string, yaml: string): Promise<Site> 
     headers: { "Content-Type": "application/x-yaml" },
     transformRequest: [(d) => d], // send raw string, don't JSON-encode
   });
+  return data;
+}
+
+// ---- Diagnostics (status / pods / events) ----
+
+export interface Condition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+  lastTransition?: string;
+}
+export interface PodStatus {
+  name: string;
+  phase: string;
+  ready: string;
+  reason?: string;
+  message?: string;
+  restarts: number;
+  node?: string;
+  created?: string;
+}
+export interface SiteEvent {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  object: string;
+  lastSeen?: string;
+}
+export interface SiteStatus {
+  phase: string;
+  message?: string;
+  conditions?: Condition[];
+  pods?: PodStatus[];
+  events?: SiteEvent[];
+}
+
+export async function getSiteStatus(name: string): Promise<SiteStatus> {
+  const { data } = await api.get<SiteStatus>(`/sites/${name}/status`);
   return data;
 }
 

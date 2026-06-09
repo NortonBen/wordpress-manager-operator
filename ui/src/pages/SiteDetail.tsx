@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  Card, Descriptions, Tabs, Input, Button, Space, Tag, message, Spin, Typography, Alert, Tooltip,
+  Card, Descriptions, Tabs, Input, Button, Space, Tag, message, Spin, Typography, Alert, Tooltip, Table, Empty,
 } from "antd";
 import {
   ArrowLeftOutlined, SaveOutlined, ReloadOutlined, GlobalOutlined, CodeOutlined, FileTextOutlined,
-  PauseCircleOutlined, PlayCircleOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, ProfileOutlined,
 } from "@ant-design/icons";
 import yaml from "js-yaml";
 import {
-  getSite, getSiteYAML, updateSiteYAML, suspendSite, resumeSite, getMetrics,
-  type Site, type SiteYAML, type SiteUsage,
+  getSite, getSiteYAML, updateSiteYAML, suspendSite, resumeSite, getMetrics, getSiteStatus,
+  type Site, type SiteYAML, type SiteUsage, type SiteStatus, type PodStatus, type SiteEvent,
 } from "../api/client";
 import { millis, mib } from "../format";
 
 const phaseColor: Record<string, string> = {
   Ready: "green", Provisioning: "blue", Pending: "default", Suspended: "orange", Error: "red",
+};
+
+const podColor: Record<string, string> = {
+  Running: "green", Succeeded: "green", Pending: "orange", Failed: "red", Unknown: "default",
 };
 
 const editorStyle: React.CSSProperties = {
@@ -33,6 +37,7 @@ export default function SiteDetail() {
   const [yamlDoc, setYamlDoc] = useState<SiteYAML | null>(null);
   const [draft, setDraft] = useState("");
   const [usage, setUsage] = useState<SiteUsage | undefined>();
+  const [status, setStatus] = useState<SiteStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -45,13 +50,15 @@ export default function SiteDetail() {
       // renders the host details instead of blanking the whole page.
       const s = await getSite(name);
       setSite(s);
-      const [y, m] = await Promise.all([
+      const [y, m, st] = await Promise.all([
         getSiteYAML(name).catch(() => null),
         getMetrics().catch(() => undefined),
+        getSiteStatus(name).catch(() => undefined),
       ]);
       setYamlDoc(y);
       setDraft(y?.source ?? "");
       setUsage(m?.sites.find((u) => u.name === name));
+      setStatus(st);
       if (!y) {
         message.warning("Không tải được YAML cấu hình — kiểm tra apiserver đã có endpoint /yaml chưa");
       }
@@ -127,6 +134,20 @@ export default function SiteDetail() {
           </Button>
         )}
       </Space>
+
+      {site.phase && site.phase !== "Ready" && site.phase !== "Suspended" && (
+        <Alert
+          type={site.phase === "Error" ? "error" : "warning"}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`Host đang ở trạng thái "${site.phase}"`}
+          description={
+            status?.message ||
+            site.message ||
+            "Xem tab “Trạng thái & Sự kiện” để biết pod đang vướng ở đâu (PVC, image, lịch schedule…)."
+          }
+        />
+      )}
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered>
@@ -236,6 +257,115 @@ export default function SiteDetail() {
               <pre style={{ ...editorStyle, padding: 16, borderRadius: 6, maxHeight: "60vh", overflow: "auto" }}>
                 {yamlDoc?.rendered}
               </pre>
+            ),
+          },
+          {
+            key: "status",
+            label: (
+              <span>
+                <ProfileOutlined /> Trạng thái &amp; Sự kiện
+              </span>
+            ),
+            children: (
+              <div>
+                <Space style={{ marginBottom: 12 }}>
+                  <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+                    Làm mới
+                  </Button>
+                </Space>
+
+                <Typography.Text strong>Conditions</Typography.Text>
+                {status?.conditions?.length ? (
+                  <Table
+                    style={{ marginTop: 8 }}
+                    size="small"
+                    rowKey="type"
+                    pagination={false}
+                    dataSource={status.conditions}
+                    columns={[
+                      { title: "Type", dataIndex: "type", width: 110 },
+                      {
+                        title: "Status",
+                        dataIndex: "status",
+                        width: 90,
+                        render: (v: string) => <Tag color={v === "True" ? "green" : "red"}>{v}</Tag>,
+                      },
+                      { title: "Reason", dataIndex: "reason", width: 150 },
+                      { title: "Message", dataIndex: "message" },
+                    ]}
+                  />
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có condition" />
+                )}
+
+                <Typography.Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+                  Pods
+                </Typography.Text>
+                {status?.pods?.length ? (
+                  <Table<PodStatus>
+                    size="small"
+                    rowKey="name"
+                    pagination={false}
+                    dataSource={status.pods}
+                    columns={[
+                      { title: "Pod", dataIndex: "name" },
+                      {
+                        title: "Phase",
+                        dataIndex: "phase",
+                        width: 100,
+                        render: (p: string) => <Tag color={podColor[p] || "default"}>{p}</Tag>,
+                      },
+                      { title: "Ready", dataIndex: "ready", width: 70 },
+                      {
+                        title: "Reason",
+                        dataIndex: "reason",
+                        width: 170,
+                        render: (rsn: string, rec: PodStatus) =>
+                          rsn ? (
+                            <Tooltip title={rec.message}>
+                              <Tag color="orange">{rsn}</Tag>
+                            </Tooltip>
+                          ) : (
+                            <Typography.Text type="secondary">–</Typography.Text>
+                          ),
+                      },
+                      { title: "Restarts", dataIndex: "restarts", width: 90 },
+                      { title: "Node", dataIndex: "node", render: (n: string) => n || "–" },
+                    ]}
+                  />
+                ) : (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="Không có pod (cluster mock, hoặc pod chưa được schedule)"
+                  />
+                )}
+
+                <Typography.Text strong style={{ display: "block", margin: "16px 0 8px" }}>
+                  Events
+                </Typography.Text>
+                {status?.events?.length ? (
+                  <Table<SiteEvent>
+                    size="small"
+                    rowKey={(e) => `${e.object}|${e.reason}|${e.lastSeen ?? ""}`}
+                    pagination={false}
+                    dataSource={status.events}
+                    columns={[
+                      {
+                        title: "Type",
+                        dataIndex: "type",
+                        width: 90,
+                        render: (t: string) => <Tag color={t === "Warning" ? "red" : "default"}>{t}</Tag>,
+                      },
+                      { title: "Reason", dataIndex: "reason", width: 160 },
+                      { title: "Object", dataIndex: "object", width: 180 },
+                      { title: "Message", dataIndex: "message" },
+                      { title: "×", dataIndex: "count", width: 50 },
+                    ]}
+                  />
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Không có event" />
+                )}
+              </div>
             ),
           },
         ]}
