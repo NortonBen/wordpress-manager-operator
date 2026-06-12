@@ -1,8 +1,6 @@
 package resources
 
 import (
-	"strings"
-
 	wpv1 "github.com/benji/wordpress-manager-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -13,10 +11,28 @@ import (
 // DefaultImage is used when a site does not pin its own WordPress image.
 const DefaultImage = "wordpress:latest"
 
-// ForceHTTPSSnippet is injected into wp-config.php (via WORDPRESS_CONFIG_EXTRA)
-// so WordPress behind a TLS-terminating proxy/ingress treats the request as
-// HTTPS — avoiding redirect loops and http:// URLs.
+// ForceHTTPSSnippet is inserted at the TOP of wp-config.php (right after the
+// opening <?php) so WordPress behind a TLS-terminating proxy/ingress treats the
+// request as HTTPS — avoiding redirect loops and http:// URLs. It runs before
+// anything else in wp-config.
 const ForceHTTPSSnippet = "$_SERVER['HTTP_X_FORWARDED_PROTO'] = 'https';"
+
+const (
+	// ForwardedProtoFile is the ConfigMap key / mounted file holding the snippet.
+	ForwardedProtoFile = "forwarded-proto.php"
+	// ForwardedProtoMount is where that file is mounted in the container.
+	ForwardedProtoMount = "/etc/wpmgr/" + ForwardedProtoFile
+)
+
+// forwardedProtoPostStart waits for the WordPress entrypoint to generate
+// wp-config.php, then (idempotently) inserts the snippet right after <?php. sed
+// reads the line from the mounted file so there is no shell/PHP escaping. It
+// always exits 0 so a transient issue never kills the pod. Because it edits the
+// on-disk wp-config, it also fixes existing sites on the next restart.
+const forwardedProtoPostStart = `f=/var/www/html/wp-config.php; ` +
+	`for i in $(seq 1 60); do [ -f "$f" ] && break; sleep 1; done; ` +
+	`if [ -f "$f" ] && ! grep -q HTTP_X_FORWARDED_PROTO "$f"; then ` +
+	`sed -i '/^<?php/r ` + ForwardedProtoMount + `' "$f"; fi; exit 0`
 
 // ForceHTTPSEnabled reports whether the reverse-proxy HTTPS line is injected.
 // It is ON by default (when spec.forceHTTPS is unset).
@@ -57,17 +73,11 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 	for _, k := range SaltKeys() {
 		env = append(env, secretEnv(k, secretName, k))
 	}
-	// WORDPRESS_CONFIG_EXTRA = optional reverse-proxy HTTPS line (default on)
-	// + any user-supplied wp-config snippet.
-	var extra []string
-	if ForceHTTPSEnabled(site) {
-		extra = append(extra, ForceHTTPSSnippet)
-	}
+	// WORDPRESS_CONFIG_EXTRA carries the user-supplied wp-config snippet. The
+	// forceHTTPS line is NOT placed here (it would land lower in wp-config);
+	// instead a postStart hook inserts it right after <?php (see below).
 	if site.Spec.PHPConfig != "" {
-		extra = append(extra, site.Spec.PHPConfig)
-	}
-	if len(extra) > 0 {
-		env = append(env, corev1.EnvVar{Name: "WORDPRESS_CONFIG_EXTRA", Value: strings.Join(extra, "\n")})
+		env = append(env, corev1.EnvVar{Name: "WORDPRESS_CONFIG_EXTRA", Value: site.Spec.PHPConfig})
 	}
 	// User-supplied env wins / extends.
 	env = append(env, site.Spec.Env...)
@@ -121,6 +131,22 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 		},
 	})
 
+	// forceHTTPS: mount the snippet and insert it right after <?php at startup.
+	var lifecycle *corev1.Lifecycle
+	if ForceHTTPSEnabled(site) {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "php-config",
+			MountPath: ForwardedProtoMount,
+			SubPath:   ForwardedProtoFile,
+			ReadOnly:  true,
+		})
+		lifecycle = &corev1.Lifecycle{
+			PostStart: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{Command: []string{"sh", "-c", forwardedProtoPostStart}},
+			},
+		}
+	}
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      site.Name,
@@ -143,6 +169,7 @@ func DesiredDeployment(site *wpv1.WordPressSite, dbHost, dbPort string) *appsv1.
 						Resources:      site.Spec.Resources,
 						ReadinessProbe: probe(20),
 						LivenessProbe:  probe(60),
+						Lifecycle:      lifecycle,
 					}},
 					Volumes: volumes,
 				},

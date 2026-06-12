@@ -57,6 +57,8 @@ func DesiredPHPConfigMap(site *wpv1.WordPressSite) *corev1.ConfigMap {
 		},
 		Data: map[string]string{
 			PHPIniFileName: EffectivePHPIni(site),
+			// Read by the forceHTTPS postStart hook (inserted after <?php).
+			ForwardedProtoFile: ForceHTTPSSnippet + "\n",
 		},
 	}
 }

@@ -141,34 +141,62 @@ func configExtra(dep *appsv1.Deployment) (string, bool) {
 	return "", false
 }
 
-func TestForceHTTPSDefaultOnAndToggle(t *testing.T) {
-	s := site("blog-acme")
+func hasForwardedMount(dep *appsv1.Deployment) bool {
+	for _, vm := range dep.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if vm.MountPath == ForwardedProtoMount && vm.SubPath == ForwardedProtoFile {
+			return true
+		}
+	}
+	return false
+}
 
-	// Default (unset) → ON: the forwarded-proto line is injected.
+func TestForceHTTPSInsertsAfterPhpTag(t *testing.T) {
+	s := site("blog-acme")
 	if !ForceHTTPSEnabled(s) {
 		t.Error("ForceHTTPS should default to true")
 	}
-	v, ok := configExtra(DesiredDeployment(s, "mysql", "3306"))
-	if !ok || !strings.Contains(v, ForceHTTPSSnippet) {
-		t.Errorf("expected forwarded-proto snippet by default, got %q", v)
+
+	dep := DesiredDeployment(s, "mysql", "3306")
+	c := dep.Spec.Template.Spec.Containers[0]
+
+	// A postStart hook seds the line into wp-config right after <?php.
+	if c.Lifecycle == nil || c.Lifecycle.PostStart == nil || c.Lifecycle.PostStart.Exec == nil {
+		t.Fatal("expected a postStart hook when forceHTTPS is on")
+	}
+	cmd := strings.Join(c.Lifecycle.PostStart.Exec.Command, " ")
+	if !strings.Contains(cmd, "wp-config.php") || !strings.Contains(cmd, "sed") || !strings.Contains(cmd, "<?php") {
+		t.Errorf("postStart should sed the snippet after <?php: %q", cmd)
+	}
+	if !hasForwardedMount(dep) {
+		t.Error("forwarded-proto.php file not mounted")
+	}
+	// The snippet lives in the per-site ConfigMap.
+	cm := DesiredPHPConfigMap(s)
+	if !strings.Contains(cm.Data[ForwardedProtoFile], "HTTP_X_FORWARDED_PROTO") {
+		t.Errorf("ConfigMap missing forwarded snippet: %q", cm.Data[ForwardedProtoFile])
+	}
+	// It must NOT be in WORDPRESS_CONFIG_EXTRA anymore.
+	if v, ok := configExtra(dep); ok && strings.Contains(v, "HTTP_X_FORWARDED_PROTO") {
+		t.Errorf("forceHTTPS should not be in CONFIG_EXTRA: %q", v)
 	}
 
-	// Combined with user phpConfig.
+	// phpConfig still goes to CONFIG_EXTRA (without the forceHTTPS line).
 	s.Spec.PHPConfig = "define('WP_DEBUG', true);"
-	v, _ = configExtra(DesiredDeployment(s, "mysql", "3306"))
-	if !strings.Contains(v, ForceHTTPSSnippet) || !strings.Contains(v, "WP_DEBUG") {
-		t.Errorf("expected both snippet and phpConfig, got %q", v)
+	v, ok := configExtra(DesiredDeployment(s, "mysql", "3306"))
+	if !ok || !strings.Contains(v, "WP_DEBUG") || strings.Contains(v, "HTTP_X_FORWARDED_PROTO") {
+		t.Errorf("CONFIG_EXTRA should be phpConfig only, got %q", v)
 	}
 
-	// Explicitly OFF → no snippet (and no CONFIG_EXTRA if nothing else).
+	// Explicitly OFF → no hook, no mount.
 	off := false
 	s2 := site("shop-foo")
 	s2.Spec.ForceHTTPS = &off
-	if ForceHTTPSEnabled(s2) {
-		t.Error("explicit false should disable ForceHTTPS")
+	dep2 := DesiredDeployment(s2, "mysql", "3306")
+	if dep2.Spec.Template.Spec.Containers[0].Lifecycle != nil {
+		t.Error("no lifecycle hook expected when forceHTTPS off")
 	}
-	if v, ok := configExtra(DesiredDeployment(s2, "mysql", "3306")); ok {
-		t.Errorf("expected no WORDPRESS_CONFIG_EXTRA when off and no phpConfig, got %q", v)
+	if hasForwardedMount(dep2) {
+		t.Error("no forwarded-proto mount expected when forceHTTPS off")
 	}
 }
 
