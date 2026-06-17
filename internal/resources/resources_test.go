@@ -1,6 +1,9 @@
 package resources
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -148,6 +151,53 @@ func hasForwardedMount(dep *appsv1.Deployment) bool {
 		}
 	}
 	return false
+}
+
+// TestForwardedProtoPostStartActuallyInserts runs the REAL postStart script
+// against a wp-config that already contains "HTTP_X_FORWARDED_PROTO" (as the
+// official WordPress image ships), proving our line still gets inserted right
+// after <?php — and exactly once. This is the regression for the skipped-insert
+// bug (the old guard keyed on HTTP_X_FORWARDED_PROTO and always matched).
+func TestForwardedProtoPostStartActuallyInserts(t *testing.T) {
+	dir := t.TempDir()
+	wpconfig := filepath.Join(dir, "wp-config.php")
+	// Mimic the official image: <?php, then its built-in reverse-proxy block.
+	original := "<?php\n" +
+		"// from the wordpress image:\n" +
+		"if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') { $_SERVER['HTTPS'] = 'on'; }\n" +
+		"define('DB_NAME', 'wp');\n"
+	if err := os.WriteFile(wpconfig, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snippet := filepath.Join(dir, "forwarded-proto.php")
+	if err := os.WriteFile(snippet, []byte(ForceHTTPSSnippet+" // "+forwardedProtoMarker+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func() {
+		cmd := exec.Command("sh", "-c", forwardedProtoPostStart)
+		cmd.Env = append(os.Environ(), "WPMGR_WPCONFIG="+wpconfig, "WPMGR_SNIPPET="+snippet)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("postStart failed: %v\n%s", err, out)
+		}
+	}
+
+	run()
+	got, _ := os.ReadFile(wpconfig)
+	lines := strings.Split(string(got), "\n")
+	if lines[0] != "<?php" {
+		t.Fatalf("first line must stay <?php, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], ForceHTTPSSnippet) || !strings.Contains(lines[1], forwardedProtoMarker) {
+		t.Fatalf("line not inserted right after <?php:\n%s", got)
+	}
+
+	// Idempotent: a second run must not insert it again.
+	run()
+	got2, _ := os.ReadFile(wpconfig)
+	if n := strings.Count(string(got2), forwardedProtoMarker); n != 1 {
+		t.Errorf("snippet should appear exactly once, got %d:\n%s", n, got2)
+	}
 }
 
 func TestForceHTTPSInsertsAfterPhpTag(t *testing.T) {

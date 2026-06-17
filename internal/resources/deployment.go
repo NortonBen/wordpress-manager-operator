@@ -24,15 +24,24 @@ const (
 	ForwardedProtoMount = "/etc/wpmgr/" + ForwardedProtoFile
 )
 
+// forwardedProtoMarker uniquely tags our inserted line. The official WordPress
+// image's wp-config already contains the string "HTTP_X_FORWARDED_PROTO" (its
+// built-in reverse-proxy block), so the idempotency guard must NOT key on that —
+// it would always match and skip the insert. We key on this marker instead.
+const forwardedProtoMarker = "wpmgr-forwarded-proto"
+
 // forwardedProtoPostStart waits for the WordPress entrypoint to generate
-// wp-config.php, then (idempotently) inserts the snippet right after <?php. sed
-// reads the line from the mounted file so there is no shell/PHP escaping. It
-// always exits 0 so a transient issue never kills the pod. Because it edits the
-// on-disk wp-config, it also fixes existing sites on the next restart.
-const forwardedProtoPostStart = `f=/var/www/html/wp-config.php; ` +
+// wp-config.php, then (idempotently, guarded by the marker) inserts the snippet
+// right after <?php. sed reads the line from the mounted file (no shell/PHP
+// escaping) and writes via a temp file + mv so it works with both GNU and BSD
+// sed (no `-i`). Always exits 0 so a transient issue never kills the pod; it
+// edits the on-disk wp-config so existing sites are fixed on the next restart.
+// Paths are overridable (WPMGR_WPCONFIG / WPMGR_SNIPPET) for testing.
+const forwardedProtoPostStart = `f="${WPMGR_WPCONFIG:-/var/www/html/wp-config.php}"; ` +
+	`snip="${WPMGR_SNIPPET:-` + ForwardedProtoMount + `}"; ` +
 	`for i in $(seq 1 60); do [ -f "$f" ] && break; sleep 1; done; ` +
-	`if [ -f "$f" ] && ! grep -q HTTP_X_FORWARDED_PROTO "$f"; then ` +
-	`sed -i '/^<?php/r ` + ForwardedProtoMount + `' "$f"; fi; exit 0`
+	`if [ -f "$f" ] && ! grep -q ` + forwardedProtoMarker + ` "$f"; then ` +
+	`sed "/^<?php/r $snip" "$f" > "$f.wpmgr" && mv "$f.wpmgr" "$f"; fi; exit 0`
 
 // ForceHTTPSEnabled reports whether the reverse-proxy HTTPS line is injected.
 // It is ON by default (when spec.forceHTTPS is unset).
